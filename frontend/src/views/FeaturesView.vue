@@ -12,8 +12,10 @@
   <section class="feature-details">
     <div class="container">
       <div class="feature-item">
-        <i class="fas fa-user-circle"></i>
-        <h2>Customer Persona-based Lead Generation</h2>
+        <div class="feature-header">
+          <i class="fas fa-user-circle"></i>
+          <h2>Customer Persona-based Lead Generation</h2>
+        </div>
         <p>
           Our advanced AI algorithms analyze vast amounts of data to create
           detailed customer personas. This allows us to generate highly targeted
@@ -28,8 +30,10 @@
       </div>
 
       <div class="feature-item">
-        <i class="fas fa-envelope"></i>
-        <h2>Validated Email Addresses</h2>
+        <div class="feature-header">
+          <i class="fas fa-envelope"></i>
+          <h2>Validated Email Addresses</h2>
+        </div>
         <p>
           Say goodbye to bounced emails and wasted efforts. Our system
           rigorously verifies each email address to ensure accuracy and
@@ -44,8 +48,10 @@
       </div>
 
       <div class="feature-item">
-        <i class="fas fa-share-alt"></i>
-        <h2>Social Media Profiles</h2>
+        <div class="feature-header">
+          <i class="fas fa-share-alt"></i>
+          <h2>Social Media Profiles</h2>
+        </div>
         <p>
           Get a 360-degree view of your leads with comprehensive social media
           profiles. Understand their interests, behaviors, and preferences to
@@ -59,8 +65,10 @@
       </div>
 
       <div class="feature-item">
-        <i class="fas fa-chart-line"></i>
-        <h2>Real-time Analytics</h2>
+        <div class="feature-header">
+          <i class="fas fa-chart-line"></i>
+          <h2>Real-time Analytics</h2>
+        </div>
         <p>
           Stay on top of your lead generation efforts with our powerful,
           real-time analytics dashboard. Monitor performance, identify trends,
@@ -166,6 +174,23 @@ export default {
 .feature-item h2 {
   color: #4a90e2;
   margin-bottom: 1rem;
+}
+.feature-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.feature-header i {
+  font-size: 2rem;
+  color: #4a90e2;
+  margin-right: 1rem;
+}
+
+.feature-header h2 {
+  color: #4a90e2;
+  margin: 0;
+  font-size: 1.5rem;
 }
 
 .feature-item p {

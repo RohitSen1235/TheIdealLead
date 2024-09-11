@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import HomeView from "../views/HomeView.vue";
 import FeaturesView from "../views/FeaturesView.vue";
-import PricingView from "../views/PricingView.vue"; // Add this line
+// import PricingView from "../views/PricingView.vue";
 
 const routes = [
   {
@@ -14,11 +14,11 @@ const routes = [
     name: "features",
     component: FeaturesView,
   },
-  {
-    path: "/pricing",
-    name: "pricing",
-    component: PricingView,
-  },
+  // {
+  //   path: "/pricing",
+  //   name: "pricing",
+  //   component: PricingView,
+  // },
 ];
 
 const router = createRouter({
