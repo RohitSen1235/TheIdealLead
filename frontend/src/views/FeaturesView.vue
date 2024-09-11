@@ -4,7 +4,7 @@
       <div class="hero-content">
         <h1>{{ title }}</h1>
         <p>{{ subtitle }}</p>
-        <button @click="ctaAction" class="cta-button">Get Started</button>
+        <button @click="ctaAction" class="cta-button">Get Access</button>
       </div>
     </div>
   </section>
@@ -85,6 +85,8 @@
 </template>
 
 <script>
+import "@/assets/styles/features.css";
+
 export default {
   name: "FeaturesView",
   data() {
@@ -104,7 +106,7 @@ export default {
   },
 };
 </script>
-
+<!-- 
 <style scoped>
 .hero {
   background: linear-gradient(135deg, #4a90e2, #50e3c2);
@@ -157,52 +159,5 @@ export default {
   padding: 4rem 0;
 }
 
-.feature-item {
-  margin-bottom: 4rem;
-  padding: 2rem;
-  background-color: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
 
-.feature-item i {
-  font-size: 3rem;
-  color: #4a90e2;
-  margin-bottom: 1rem;
-}
-
-.feature-item h2 {
-  color: #4a90e2;
-  margin-bottom: 1rem;
-}
-.feature-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: 1rem;
-}
-
-.feature-header i {
-  font-size: 2rem;
-  color: #4a90e2;
-  margin-right: 1rem;
-}
-
-.feature-header h2 {
-  color: #4a90e2;
-  margin: 0;
-  font-size: 1.5rem;
-}
-
-.feature-item p {
-  margin-bottom: 1rem;
-  line-height: 1.6;
-}
-
-.feature-item ul {
-  padding-left: 1.5rem;
-}
-
-.feature-item li {
-  margin-bottom: 0.5rem;
-}
-</style>
+</style> -->

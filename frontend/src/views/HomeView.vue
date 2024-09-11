@@ -5,7 +5,7 @@
         <div class="hero-content">
           <h1>{{ title }}</h1>
           <p>{{ subtitle }}</p>
-          <button @click="ctaAction" class="cta-button">Get Started</button>
+          <button @click="ctaAction" class="cta-button">Get Access</button>
         </div>
       </div>
     </section>
@@ -45,7 +45,6 @@
 
     <section id="lead-form-section" class="lead-form-section">
       <div class="container">
-        <h2>Get Started Today</h2>
         <LeadForm />
       </div>
     </section>
@@ -87,53 +86,6 @@ export default {
 </script>
 
 <style scoped>
-.hero {
-  background: linear-gradient(135deg, #4a90e2, #50e3c2);
-  color: white;
-  padding: 4rem 0;
-  text-align: center;
-  display: flex;
-  align-items: center;
-  min-height: 300px;
-}
-
-.hero-content {
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.hero h1 {
-  font-size: 3rem;
-  margin-bottom: 1rem;
-  line-height: 1.2;
-}
-
-.hero p {
-  font-size: 1.2rem;
-  margin-bottom: 2rem;
-  opacity: 0.9;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.cta-button {
-  background-color: white;
-  color: #4a90e2;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  font-size: 1rem;
-  font-weight: 600;
-  border-radius: 50px;
-  cursor: pointer;
-  transition: background-color 0.3s ease, transform 0.2s ease;
-}
-
-.cta-button:hover {
-  background-color: #f0f0f0;
-  transform: translateY(-2px);
-}
-
 .features {
   padding: 4rem 0;
   background-color: white;

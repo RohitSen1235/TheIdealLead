@@ -6,11 +6,11 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import IntegrityError
-import smtplib  # Add this line
+
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-
-
+import smtplib  # Add this line
+from config import EMAIL_HOST, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM
 app = FastAPI()
 
 # Configure CORS
@@ -54,12 +54,7 @@ def get_db():
     finally:
         db.close()
 
-# Email configuration
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_USERNAME = "confirmdoc.usa@gmail.com"
-EMAIL_PASSWORD = "rqzalxixntgmmlhg"
-EMAIL_FROM = "confirmdoc.usa@gmail.com"
+
 
 async def send_email(to_email: str, name: str):
     message = MIMEMultipart("alternative")
