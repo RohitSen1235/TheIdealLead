@@ -118,15 +118,19 @@ async def send_email(to_email: str, name: str):
     </head>
     <body>
         <div class="header">
-            <h1>Welcome to LeadGen Pro</h1>
+            <h1>Welcome to The.Ideal.Leads</h1>
         </div>
         <div class="content">
             <h2>Dear {name},</h2>
             <p>Thank you for your interest in LeadGen Pro! We're thrilled to have you on board.</p>
             <p>We're excited to inform you that you are now eligible for our <strong>exclusive early access program</strong>. This program offers you the unique opportunity to:</p>
             <ul>
-                <li>Test our cutting-edge lead generation product</li>
+                <li>Use and Review our cutting-edge lead generation product</li>
+                    <ul>
+                        <li><em>Free of charge For limited time only</em></li>
+                    </ul>
                 <li>Provide valuable feedback to shape its development</li>
+                <li>Be one of the first to experience new features and improvements</li>
                 <li>Gain a competitive edge in your industry</li>
             </ul>
             <p>Your insights and experiences will be instrumental in refining LeadGen Pro to better meet the needs of professionals like yourself. We truly value your input and look forward to your participation.</p>
@@ -134,7 +138,7 @@ async def send_email(to_email: str, name: str):
             <a href="#" class="cta-button">Learn More About Early Access</a>
         </div>
         <p>Thank you again for your interest and support. We're thrilled to have you as part of our community of early adopters!</p>
-        <p>Best regards,<br>The LeadGen Pro Team</p>
+        <p>Best regards,<br>The.Ideal.Leads Team</p>
     </body>
     </html>
     """
