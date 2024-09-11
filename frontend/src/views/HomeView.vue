@@ -12,7 +12,7 @@
 
     <section class="features">
       <div class="container">
-        <h2>Why Choose LeadGen Pro?</h2>
+        <h2>Why Choose The.Ideal.Leads ?</h2>
         <div class="feature-grid">
           <div class="feature-item">
             <i class="fas fa-user-circle"></i>

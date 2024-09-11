@@ -3,8 +3,8 @@
     <form @submit.prevent="submitLead" class="lead-form">
       <h2>Get Early Access</h2>
       <p>
-        LeadGen Pro is currently in development. Sign up to get early access
-        when it's ready. This is a limited time offer.
+        The.Ideal.Leads platform is currently in development. Sign up to get
+        early access when it's ready. This is a limited time offer.
       </p>
       <div class="form-group">
         <label for="name">Name</label>
@@ -47,7 +47,7 @@
         />
       </div>
       <button type="submit" class="cta-button" :disabled="isSubmitting">
-        {{ isSubmitting ? "Submitting..." : "Get Access" }}
+        {{ isSubmitting ? "Submitting..." : "Sign Up" }}
       </button>
     </form>
   </div>

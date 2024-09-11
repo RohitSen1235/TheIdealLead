@@ -2,7 +2,7 @@
   <div id="app">
     <header>
       <div class="container">
-        <h1>LeadGen Pro</h1>
+        <h1>The.Ideal.Leads</h1>
         <nav>
           <router-link to="/">Home</router-link>
           <router-link to="/features">Features</router-link>
@@ -16,7 +16,7 @@
 
     <footer>
       <div class="container">
-        <p>&copy; 2023 LeadGen Pro. All rights reserved.</p>
+        <p>&copy; 2024 The.Ideal.Leads All rights reserved.</p>
         <div class="social-links">
           <a href="#" aria-label="Facebook"><i class="fab fa-facebook"></i></a>
           <a href="#" aria-label="Twitter"><i class="fab fa-twitter"></i></a>

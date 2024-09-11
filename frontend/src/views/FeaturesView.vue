@@ -11,6 +11,7 @@
 
   <section class="feature-details">
     <div class="container">
+      <h2>Features In Detail</h2>
       <div class="feature-item">
         <div class="feature-header">
           <i class="fas fa-user-circle"></i>
@@ -93,7 +94,7 @@ export default {
     return {
       title: "Our Features",
       subtitle:
-        "Discover how LeadGen Pro can revolutionize your lead generation process",
+        "Discover how we can revolutionize your lead generation process",
     };
   },
   methods: {
