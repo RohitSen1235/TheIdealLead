@@ -1,6 +1,6 @@
-# LeadGen Pro: AI-Powered Lead Generation Platform
+# The.Ideal.Leads: AI-Powered Lead Generation Platform
 
-LeadGen Pro is an innovative, AI-driven lead generation platform designed to help businesses streamline their customer acquisition process. By leveraging advanced algorithms and data analysis, LeadGen Pro creates detailed customer personas and generates highly targeted leads, increasing conversion rates and ROI for its users.
+The.Ideal.Leads is an innovative, AI-driven lead generation platform designed to help businesses streamline their customer acquisition process. By leveraging advanced algorithms and data analysis, The.Ideal.Leads creates detailed customer personas and generates highly targeted leads, increasing conversion rates and ROI for its users.
 
 ## Key Features
 
@@ -98,7 +98,7 @@ Before running the project, ensure you have the following installed:
 
 ## Accessing the Application
 
-Open a web browser and navigate to `http://localhost:8080` to access the LeadGen Pro application.
+Open a web browser and navigate to `http://localhost:8080` to access the The.Ideal.Leads application.
 
 ## Current State and Future Development
 
