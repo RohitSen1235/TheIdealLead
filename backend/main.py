@@ -10,7 +10,15 @@ from sqlalchemy.exc import IntegrityError
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import smtplib  # Add this line
+
+# for making HTTP request to webhook
+import httpx  # Make sure to install httpx for making HTTP request
+
+# import internal modules
 from config import EMAIL_HOST, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM
+from models import LeadGenerationRequest, LeadCreate
+
+
 app = FastAPI()
 
 # Configure CORS
@@ -39,12 +47,6 @@ class Lead(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# Pydantic model for request validation
-class LeadCreate(BaseModel):
-    name: str
-    email: EmailStr
-    company: str
-    phone: str
 
 # Dependency to get the database session
 def get_db():
@@ -53,8 +55,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
 
 async def send_email(to_email: str, name: str):
     message = MIMEMultipart("alternative")
@@ -201,6 +201,30 @@ async def submit_lead(lead: LeadCreate, background_tasks: BackgroundTasks, db: S
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to the Lead Generation API"}
+
+
+@app.post("/start-lead-generation/")
+async def start_lead_generation(request: LeadGenerationRequest):
+    # Prepare the data to send to the webhook
+    webhook_url = "https://example.com/your-webhook-url"  # Replace with your actual webhook URL
+    payload = {
+        "ideal_customer_profile": request.ideal_customer_profile,
+        "number_of_leads": request.number_of_leads
+    }
+
+    try:
+        # Call the webhook to start the lead gathering process
+        async with httpx.AsyncClient() as client:
+            response = await client.post(webhook_url, json=payload)
+
+        # Check the response from the webhook
+        if response.status_code == 200:
+            return {"message": "Lead generation process has started. You will be notified via email once completed."}
+        else:
+            raise HTTPException(status_code=response.status_code, detail="Failed to start lead generation process.")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
