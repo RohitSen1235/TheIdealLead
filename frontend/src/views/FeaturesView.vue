@@ -87,6 +87,7 @@
 
 <script>
 import "@/assets/styles/features.css";
+// import "@/assets/styles/global.css";
 
 export default {
   name: "FeaturesView",

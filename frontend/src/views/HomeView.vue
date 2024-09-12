@@ -52,8 +52,8 @@
 </template>
 
 <script>
-import LeadForm from "../components/LeadForm.vue";
-
+import LeadForm from "@/components/LeadForm.vue";
+import "@/assets/styles/global.css";
 export default {
   name: "HomeView",
   data() {
