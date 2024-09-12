@@ -45,7 +45,23 @@
     transform: translateY(-2px);
   }
   
+  .feature-details {
+    padding: 4rem 0;
+    background-color: white;
+  }
   
+  .feature-details h2 {
+    text-align: center;
+    margin-bottom: 3rem;
+    font-size: 2.5rem;
+    color: #4a90e2;
+  }
+
+  header h1 {
+    font-size: 1.5rem;
+    padding-left: 1rem;
+  }
+
   @media (max-width: 768px) {
     .hero h1 {
       font-size: 2.5rem;
@@ -53,5 +69,40 @@
   
     .hero p {
       font-size: 1rem;
+    }
+    body {
+      font-size: 0.9rem; /* Smaller base font size */
+      /* padding-left: 0.5rem;
+      padding-right: 0.5rem; */
+    }
+    nav {
+      padding-left: 1rem;
+      padding-right: 1rem;
+    }
+    h1 {
+        font-size: 2rem; /* Smaller heading size */
+    }
+
+    h2 {
+        font-size: 1.5rem; /* Smaller heading size */
+    }
+
+    h3 {
+        font-size: 1.25rem; /* Smaller heading size */
+    }
+    button,
+    .cta-button {
+        padding: 0.5rem 1rem; /* Smaller button padding */
+        font-size: 0.9rem; /* Smaller button font size */
+    }
+
+    input,
+    textarea {
+        padding: 0.5rem; /* Smaller padding for input fields */
+        font-size: 0.9rem; /* Smaller font size for inputs */
+    }
+
+    .lead-form-container {
+        padding: 1rem; /* Reduce padding on mobile */
     }
   }

@@ -6,8 +6,8 @@
         <nav>
           <router-link to="/">Home</router-link>
           <router-link to="/features">Features</router-link>
-          <!-- <router-link to="/pricing">Pricing</router-link>
-          <router-link to="/contact">Contact</router-link> -->
+          <router-link to="/demo">Start Trial</router-link>
+          <!-- Link to the Demo page -->
         </nav>
       </div>
     </header>
@@ -36,6 +36,7 @@ export default {
 <style>
 @import url("https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap");
 @import url("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css");
+@import "./assets/styles/global.css";
 
 :root {
   --primary-color: #4a90e2;

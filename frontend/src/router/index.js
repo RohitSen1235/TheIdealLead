@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import HomeView from "../views/HomeView.vue";
 import FeaturesView from "../views/FeaturesView.vue";
+import DemoView from "../views/DemoView.vue"; // Import the Demo view
 // import PricingView from "../views/PricingView.vue";
 
 const routes = [
@@ -13,6 +14,11 @@ const routes = [
     path: "/features",
     name: "features",
     component: FeaturesView,
+  },
+  {
+    path: "/demo", // Add the route for the Demo page
+    name: "demo",
+    component: DemoView,
   },
   // {
   //   path: "/pricing",
