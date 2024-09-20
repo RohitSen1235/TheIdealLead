@@ -18,8 +18,8 @@
         Fill out the form below to initiate the lead generation process tailored
         to your Ideal Customer Profile.
         <br />
-        <span style="color: #4a90e2; font-weight: bold"
-          >Note: This is a demo version, so there are restictions for
+        <span style="color: #4a90e2; font-weight: bold">
+          Note: This is a demo version, so there are restictions for
           usage.</span
         >
       </p>
@@ -43,7 +43,9 @@
             required
           />
         </div>
-        <button type="submit" class="cta-button">Start Lead Generation</button>
+        <button type="submit" class="cta-button" :disabled="isSubmitting">
+          {{ isSubmitting ? "Submitting..." : "Start Lead Generation" }}
+        </button>
       </form>
       <p v-if="message" class="response-message">{{ message }}</p>
     </div>
@@ -51,28 +53,47 @@
 </template>
 
 <script>
-import api from "@/services/api"; // Adjust the import path as necessary
-import "@/assets/styles/global.css";
+import api from "@/services/api";
+
 export default {
   data() {
     return {
       icp: "",
       numberOfLeads: null,
       message: "",
+      isSubmitting: false,
     };
   },
   methods: {
     async startLeadGeneration() {
+      this.isSubmitting = true;
+      this.message = "";
       try {
         const response = await api.startLeadGeneration({
           ideal_customer_profile: this.icp,
-          number_of_leads: this.numberOfLeads,
+          number_of_leads: parseInt(this.numberOfLeads, 10),
         });
+        console.log("API Response:", response); // Debug log
         this.message = response.message;
       } catch (error) {
-        this.message =
-          "An error occurred while starting the lead generation process.";
-        console.error(error);
+        console.error("Error:", error);
+        if (error.response) {
+          // The request was made and the server responded with a status code
+          // that falls out of the range of 2xx
+          this.message = `Error: ${
+            error.response.message || "An error occurred on the server."
+          }`;
+        } else if (error.request) {
+          // The request was made but no response was received
+          this.message =
+            "Error: No response received from the server. Please try again later.";
+        } else {
+          // Something happened in setting up the request that triggered an Error
+          this.message =
+            "Error: Failed to send request. Please try again later.";
+        }
+      } finally {
+        this.isSubmitting = false;
       }
     },
   },
