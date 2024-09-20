@@ -13,7 +13,8 @@ import smtplib  # Add this line
 
 # for making HTTP request to webhook
 import httpx  # Make sure to install httpx for making HTTP request
-
+import json
+import uuid
 # import internal modules
 from config import EMAIL_HOST, EMAIL_PORT, EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM
 from models import LeadGenerationRequest, LeadCreate
@@ -205,26 +206,42 @@ async def read_root():
 
 @app.post("/start-lead-generation/")
 async def start_lead_generation(request: LeadGenerationRequest):
-    # Prepare the data to send to the webhook
-    webhook_url = "https://example.com/your-webhook-url"  # Replace with your actual webhook URL
+    print(f"Received lead generation request: {request}")  # Debug print
+    webhook_url = "https://n8n.rsfreelance.com/webhook/find-leads"  # Verify this URL
+
     payload = {
         "ideal_customer_profile": request.ideal_customer_profile,
-        "number_of_leads": request.number_of_leads
+        "number_of_leads": request.number_of_leads,
+        "task_id": str(uuid.uuid4())
     }
 
     try:
-        # Call the webhook to start the lead gathering process
         async with httpx.AsyncClient() as client:
             response = await client.post(webhook_url, json=payload)
 
-        # Check the response from the webhook
-        if response.status_code == 200:
+        print(f"Webhook response status: {response.status_code}")
+        print(f"Webhook response content: {response.text}")
+
+        # Parse the JSON response
+        webhook_response = json.loads(response.text)
+
+        if webhook_response.get("status") == 200:
             return {"message": "Lead generation process has started. You will be notified via email once completed."}
         else:
-            raise HTTPException(status_code=response.status_code, detail="Failed to start lead generation process.")
+            raise HTTPException(status_code=400, detail="Webhook returned an unexpected response")
 
+    except json.JSONDecodeError:
+        print("Failed to parse webhook response as JSON")
+        raise HTTPException(status_code=500, detail="Error processing webhook response")
+    except httpx.HTTPStatusError as e:
+        print(f"HTTP Status Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error calling webhook: {str(e)}")
+    except httpx.RequestError as e:
+        print(f"Request Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Error making request to webhook: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+        print(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
