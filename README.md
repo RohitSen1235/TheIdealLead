@@ -2,111 +2,196 @@
 
 The.Ideal.Leads is an innovative, AI-driven lead generation platform designed to help businesses streamline their customer acquisition process. By leveraging advanced algorithms and data analysis, The.Ideal.Leads creates detailed customer personas and generates highly targeted leads, increasing conversion rates and ROI for its users.
 
+## Technical Stack
+
+### Frontend
+- Vue.js 3.x
+- Vue Router 4.x for navigation
+- Vuex 4.x for state management
+- Axios for API communication
+- SASS for styling
+- Cypress for E2E testing
+- Jest for unit testing
+
+### Backend
+- FastAPI (Python web framework)
+- SQLAlchemy ORM
+- SQLite database
+- Pydantic for data validation
+- SMTP for email communications
+- Background task processing
+- Webhook integration for AI processing
+
 ## Key Features
 
-1. **Customer Persona-based Lead Generation**: AI algorithms analyze vast amounts of data to create detailed customer personas, allowing for highly targeted lead generation.
+1. **AI-Powered Lead Generation**
+   - Custom Ideal Customer Profile (ICP) input
+   - Automated lead generation process
+   - Real-time processing status updates
 
-2. **Validated Email Addresses**: Ensures that all generated leads have valid and active email addresses, improving outreach efficiency.
+2. **Lead Management System**
+   - Validated email addresses
+   - Secure data storage
+   - Automated email notifications
 
-3. **Early Access Program**: Offers users the opportunity to test the product and provide valuable feedback during the development phase.
+3. **User Interface**
+   - Modern, responsive design
+   - Interactive form components
+   - Real-time feedback
+   - Cross-browser compatibility
 
-
-## Project Structure
-
-The project is divided into two main parts:
-
-1. **Frontend**: A Vue.js application that handles the user interface and interactions.
-2. **Backend**: A FastAPI application that manages data processing, storage, and email communications.
+4. **Early Access Program**
+   - Product testing opportunity
+   - Feedback collection system
+   - Priority access to new features
 
 ## Prerequisites
 
-Before running the project, ensure you have the following installed:
-
-- Node.js (v14 or later)
+- Node.js (v14.x or later)
 - Python (v3.8 or later)
 - pip (Python package manager)
-- npm (Node package manager)
+- npm (v6.x or later)
+- Git
+
+## Project Structure
+
+```
+targetsphere/
+├── backend/                 # Python/FastAPI backend
+│   ├── config_template.py   # Email configuration template
+│   ├── main.py             # Main application file
+│   ├── models.py           # Database models
+│   └── requirements.txt    # Python dependencies
+│
+├── frontend/               # Vue.js frontend
+│   ├── public/            # Static files
+│   ├── src/               # Source files
+│   │   ├── assets/       # Images and styles
+│   │   ├── components/   # Vue components
+│   │   ├── router/       # Vue router configuration
+│   │   ├── services/     # API services
+│   │   ├── store/        # Vuex store
+│   │   └── views/        # Vue views
+│   └── tests/            # Frontend tests
+│       ├── e2e/          # Cypress tests
+│       └── unit/         # Jest tests
+```
 
 ## Setup and Installation
 
 ### Backend Setup
 
 1. Navigate to the backend directory:
-   ```
+   ```bash
    cd backend
    ```
 
 2. Create a virtual environment:
-   ```
+   ```bash
    python -m venv venv
    ```
 
 3. Activate the virtual environment:
-   - On Windows:
-     ```
+   - Windows:
+     ```bash
      venv\Scripts\activate
      ```
-   - On macOS and Linux:
-     ```
+   - macOS/Linux:
+     ```bash
      source venv/bin/activate
      ```
 
-4. Install the required Python packages:
-   ```
+4. Install dependencies:
+   ```bash
    pip install -r requirements.txt
    ```
 
-5. Set up environment variables:
-   Create a `config.py` file in the backend directory and add the following:
-   ```
-   EMAIL_HOST=your_smtp_server
-   EMAIL_PORT=587
-   EMAIL_USERNAME=your_email@example.com
-   EMAIL_PASSWORD=your_email_password
-   EMAIL_FROM=your_email@example.com
-   ```
+5. Configure email settings:
+   - Copy `config_template.py` to `config.py`
+   - Update the following variables:
+     ```python
+     EMAIL_HOST=your_smtp_server
+     EMAIL_PORT=587
+     EMAIL_USERNAME=your_email@example.com
+     EMAIL_PASSWORD=your_email_password
+     EMAIL_FROM=your_email@example.com
+     ```
 
 ### Frontend Setup
 
 1. Navigate to the frontend directory:
-   ```
+   ```bash
    cd frontend
    ```
 
-2. Install the required npm packages:
-   ```
+2. Install dependencies:
+   ```bash
    npm install
    ```
 
-## Running the Project
+## Development
 
-### Start the Backend Server
+### Running the Backend
 
-1. From the backend directory, with the virtual environment activated, run:
-   ```
-   uvicorn main:app --reload
-   ```
-   The backend server will start running on `http://localhost:8000`.
+```bash
+cd backend
+uvicorn main:app --reload
+```
+The API will be available at `http://localhost:8000`
 
-### Start the Frontend Development Server
+### Running the Frontend
 
-1. From the frontend directory, run:
-   ```
-   npm run serve
-   ```
-   The frontend development server will start running on `http://localhost:8080`.
+```bash
+cd frontend
+npm run serve
+```
+The application will be available at `http://localhost:8080`
 
-## Accessing the Application
+### Running Tests
 
-Open a web browser and navigate to `http://localhost:8080` to access the The.Ideal.Leads application.
+Frontend tests:
+```bash
+cd frontend
+# Unit tests
+npm run test:unit
+# E2E tests
+npm run test:e2e
+```
+
+## API Endpoints
+
+- `POST /submit-lead/`: Submit new lead information
+  - Required fields: name, email, company, phone
+  - Returns: Success message and lead status
+
+- `POST /start-lead-generation/`: Initialize AI lead generation
+  - Required fields: ideal_customer_profile, number_of_leads
+  - Returns: Process initiation status
 
 ## Current State and Future Development
 
-- The application currently showcases the main features and collects leads through the early access program.
-- The pricing page is hidden as the product is still in the early access phase.
-- Future development will include implementing the full lead generation functionality, integrating advanced AI algorithms, and introducing a comprehensive pricing structure.
+- Early access program active
+- Core lead generation functionality implemented
+- Planned features:
+  - Advanced AI algorithms integration
+  - Enhanced lead qualification
+  - Custom reporting dashboard
+  - Comprehensive pricing structure
 
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ## Support
 
-For any questions or issues, please open an issue in the project repository or contact our support team at support@TheIdealLead.com.
+For technical issues or questions:
+- Open an issue in the project repository
+- Contact support at support@TheIdealLead.com
+
+## License
+
+This project is proprietary software. All rights reserved.
