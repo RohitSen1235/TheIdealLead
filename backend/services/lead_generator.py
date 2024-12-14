@@ -17,6 +17,12 @@ from collections import defaultdict
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class SearchResult:
+    def __init__(self, profiles: List[dict], total_found: int, warnings: List[str] = None):
+        self.profiles = profiles
+        self.total_found = total_found
+        self.warnings = warnings or []
+
 class ProxyManager:
     def __init__(self, proxies: List[Dict[str, str]]):
         self.proxies = proxies
@@ -141,7 +147,7 @@ class LeadGenerator:
                     }
                 ],
                 model="mixtral-8x7b-32768",
-                temperature=0.1,
+                temperature=0.3,
             )
             
             queries = chat_completion.choices[0].message.content.strip().split('\n')
@@ -255,11 +261,11 @@ class LeadGenerator:
         
         return "", False
 
-    async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int, start_index: int = 0) -> Tuple[List[dict], str]:
-        """Scrape LinkedIn profile URLs from Google search results. Returns (profiles, reason)"""
+    async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int, start_index: int = 0) -> SearchResult:
+        """Scrape LinkedIn profile URLs from Google search results"""
         profiles = []
         seen_urls = set()  # Track seen URLs to avoid duplicates
-        stop_reason = ""
+        warnings = set()  # Use set to avoid duplicate warnings
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -279,6 +285,7 @@ class LeadGenerator:
                 encoded_query = quote_plus(search_query)
                 google_start_index = 0
                 consecutive_empty_pages = 0
+                reached_page_limit = False
                 
                 while len(profiles) < num_leads and consecutive_empty_pages < max_empty_pages:
                     google_url = f"https://www.google.com/search?q={encoded_query}&start={google_start_index}"
@@ -286,15 +293,11 @@ class LeadGenerator:
                     
                     html, success = await self.make_request(session, google_url, headers)
                     if not success:
-                        stop_reason = "Failed to fetch search results. Consider checking proxy configuration."
+                        warnings.add("Search request failed. Consider checking proxy configuration.")
                         break
 
                     # Check for end of results
                     if "did not match any documents" in html:
-                        if google_start_index == 0:
-                            stop_reason = f"No search results found for query variation {query_index}."
-                        else:
-                            stop_reason = f"Reached end of search results for query variation {query_index}."
                         break
 
                     soup = BeautifulSoup(html, 'html.parser')
@@ -327,28 +330,25 @@ class LeadGenerator:
 
                     if not found_valid_links:
                         consecutive_empty_pages += 1
-                        logger.info(f"No new profiles found on this page ({consecutive_empty_pages}/{max_empty_pages} empty pages)")
                     else:
                         consecutive_empty_pages = 0
                     
                     # Move to next page
                     google_start_index += 10
                     
-                    # Break if we've gone through too many pages
+                    # Check if we've reached page limit
                     if google_start_index >= max_pages * 10:
-                        stop_reason = f"Reached maximum page limit ({max_pages} pages) for the current search query."
+                        reached_page_limit = True
                         break
+                
+                if reached_page_limit and len(profiles) < num_leads:
+                    warnings.add(f"Reached maximum page limit ({max_pages} pages) for search query {query_index}.")
         
-        # Determine final reason if we haven't found any profiles
-        if len(profiles) == 0 and not stop_reason:
-            stop_reason = "No matching LinkedIn profiles found in any of the search queries."
-        # Or if we found some but not enough
-        elif len(profiles) < num_leads:
-            if not stop_reason:
-                stop_reason = "Exhausted all available search results."
-            stop_reason = f"Found {len(profiles)} profiles out of {num_leads} requested. {stop_reason}"
-            
-        return profiles, stop_reason
+        # Only add exhausted warning if we didn't find enough profiles
+        if len(profiles) < num_leads:
+            warnings.add(f"Found {len(profiles)} profiles out of {num_leads} requested from available search results.")
+        
+        return SearchResult(profiles, len(profiles), list(warnings))
 
     async def generate_leads(self, icp: str, num_leads: int, start_index: int = 0) -> Tuple[str, str]:
         """Main method to generate leads. Returns tuple of (filepath, message)"""
@@ -358,27 +358,34 @@ class LeadGenerator:
             search_queries = await self.process_icp_to_search_query(icp)
             
             # Scrape profiles using multiple queries
-            profiles, stop_reason = await self.scrape_linkedin_profiles(search_queries, num_leads, start_index)
+            search_result = await self.scrape_linkedin_profiles(search_queries, num_leads, start_index)
             
             # Always save whatever profiles we found
-            if profiles:
+            if search_result.profiles:
                 # Generate unique filename with ICP summary and range
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 # Create a short summary from ICP (first 30 chars)
                 icp_summary = icp.replace(" ", "_")[:30].lower()
-                filename = f"ICP_{icp_summary}_{start_index+1}_to_{start_index+len(profiles)}_{timestamp}.csv"
+                filename = f"ICP_{icp_summary}_{start_index+1}_to_{start_index+len(search_result.profiles)}_{timestamp}.csv"
                 filepath = os.path.join(self.results_dir, filename)
                 
                 # Save results to CSV with new fields
                 with open(filepath, 'w', newline='') as csvfile:
                     writer = csv.DictWriter(csvfile, fieldnames=['profile_url', 'name', 'organization', 'designation', 'timestamp'])
                     writer.writeheader()
-                    writer.writerows(profiles)
+                    writer.writerows(search_result.profiles)
                 
-                logger.info(f"Lead generation completed. Found {len(profiles)} profiles.")
-                return filepath, stop_reason
+                logger.info(f"Lead generation completed. Found {len(search_result.profiles)} profiles.")
+                
+                # Create appropriate message based on results
+                if search_result.total_found >= num_leads:
+                    message = f"Successfully found {search_result.total_found} profiles."
+                else:
+                    message = "; ".join(search_result.warnings) if search_result.warnings else "No additional information."
+                
+                return filepath, message
             else:
-                raise ValueError(stop_reason)
+                raise ValueError("No profiles found in search results.")
             
         except Exception as e:
             error_message = str(e)

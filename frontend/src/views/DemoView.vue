@@ -1,3 +1,4 @@
+<!-- Previous template section remains the same until the script tag -->
 <template>
   <div>
     <!-- Hero Section -->
@@ -61,13 +62,26 @@
 
         <!-- Status Display -->
         <div class="status-container">
+          <!-- Main Status Message -->
           <div class="status-indicator" :class="groupStatus">
-            {{ getStatusMessage }}
+            {{ statusMessage }}
           </div>
 
           <!-- Progress Display -->
-          <div v-if="progressMessage" class="progress-message">
-            {{ progressMessage }}
+          <div class="progress-display">
+            <div class="progress-bar">
+              <div
+                class="progress-bar-inner"
+                :style="{ width: progressPercentage + '%' }"
+                :class="{ partial: hasFailedTasks }"
+              ></div>
+            </div>
+            <div class="progress-text">
+              {{ totalLeadsFound }} of {{ totalLeadsNeeded }} profiles found
+              <span v-if="hasFailedTasks" class="progress-warning">
+                (some tasks failed)
+              </span>
+            </div>
           </div>
 
           <!-- Task Status Display -->
@@ -76,44 +90,57 @@
               v-for="(status, taskId) in taskStatuses"
               :key="taskId"
               class="task-status"
+              :class="status.toLowerCase()"
             >
-              Task {{ getTaskNumber(taskId) }}: {{ status }}
+              <span class="task-label">Task {{ getTaskNumber(taskId) }}</span>
+              <span class="task-status-text">{{ status }}</span>
+              <span
+                v-if="getTaskError(taskId)"
+                class="task-error-icon"
+                :title="getTaskError(taskId)"
+                >⚠️</span
+              >
             </div>
-          </div>
-
-          <!-- Progress Animation -->
-          <div v-if="isProcessing" class="progress-bar">
-            <div class="progress-bar-inner"></div>
           </div>
 
           <!-- Warning Display -->
           <div v-if="showWarnings && warnings.length" class="warning-section">
-            <p
+            <div
               v-for="(warning, index) in warnings"
               :key="index"
               class="warning-message"
             >
               {{ warning }}
-            </p>
+            </div>
           </div>
 
           <!-- Error Display -->
           <div v-if="showErrors && errors.length" class="error-section">
-            <p
+            <div
               v-for="(error, index) in errors"
               :key="index"
               class="error-message"
             >
               {{ error }}
-            </p>
-            <button @click="resetTask" class="retry-button">Try Again</button>
+            </div>
           </div>
 
           <!-- Download Section -->
-          <div v-if="groupStatus === 'completed'" class="download-section">
-            <p>Your leads are ready!</p>
+          <div v-if="canDownload" class="download-section">
+            <p v-if="hasFailedTasks">
+              Some tasks failed, but you can download the profiles that were
+              found
+            </p>
+            <p v-else>Your leads are ready!</p>
             <button @click="downloadResults" class="download-button">
-              Download Leads (CSV)
+              Download {{ totalLeadsFound }} Leads (CSV)
+            </button>
+            <button
+              v-if="hasFailedTasks"
+              @click="retryFailedTasks"
+              class="retry-button"
+            >
+              Retry Failed Tasks
             </button>
           </div>
         </div>
@@ -134,12 +161,13 @@ export default {
       currentGroupId: null,
       groupStatus: "pending",
       taskStatuses: null,
-      progressMessage: "",
+      statusMessage: "",
       errors: [],
       warnings: [],
       statusCheckInterval: null,
       totalLeadsFound: 0,
       totalLeadsNeeded: 0,
+      taskErrors: {},
     };
   },
 
@@ -148,22 +176,35 @@ export default {
       return ["pending", "processing"].includes(this.groupStatus);
     },
 
-    getStatusMessage() {
-      const messages = {
-        pending: "Initializing lead generation...",
-        processing: "Generating leads...",
-        completed: "Lead generation completed!",
-        failed: "Lead generation failed",
-      };
-      return messages[this.groupStatus] || "Unknown status";
+    progressPercentage() {
+      if (this.totalLeadsNeeded === 0) return 0;
+      return Math.min(
+        100,
+        Math.round((this.totalLeadsFound / this.totalLeadsNeeded) * 100)
+      );
     },
 
     showWarnings() {
-      return !this.isProcessing;
+      return !this.isProcessing && this.warnings.length > 0;
     },
 
     showErrors() {
-      return !this.isProcessing && this.groupStatus === "failed";
+      return !this.isProcessing && this.errors.length > 0;
+    },
+
+    hasFailedTasks() {
+      return Object.values(this.taskStatuses || {}).includes("failed");
+    },
+
+    canDownload() {
+      // Allow download if we have found profiles and either:
+      // 1. All tasks are complete (success or failure)
+      // 2. Some tasks failed but we have partial results
+      return (
+        this.totalLeadsFound > 0 &&
+        (!this.isProcessing ||
+          (this.hasFailedTasks && this.totalLeadsFound > 0))
+      );
     },
   },
 
@@ -172,7 +213,8 @@ export default {
       this.isSubmitting = true;
       this.errors = [];
       this.warnings = [];
-      this.progressMessage = "";
+      this.statusMessage = "Initializing lead generation...";
+      this.taskErrors = {};
 
       try {
         const response = await api.startLeadGeneration({
@@ -198,12 +240,12 @@ export default {
         this.taskStatuses = status.task_statuses;
         this.warnings = status.warnings || [];
         this.errors = status.errors || [];
-        this.progressMessage = status.progress_message || "";
+        this.statusMessage = status.status_message || "";
         this.totalLeadsFound = status.total_leads_found;
         this.totalLeadsNeeded = status.total_leads_needed;
 
-        // Stop checking if group is completed or failed
-        if (["completed", "failed"].includes(status.status)) {
+        // Stop checking if all tasks are complete or failed
+        if (!this.isProcessing) {
           this.stopStatusChecking();
         }
       } catch (error) {
@@ -214,9 +256,12 @@ export default {
     },
 
     getTaskNumber(taskId) {
-      // Get task number from task statuses object keys
       const taskIds = Object.keys(this.taskStatuses);
       return taskIds.indexOf(taskId) + 1;
+    },
+
+    getTaskError(taskId) {
+      return this.taskErrors[taskId] || "";
     },
 
     startStatusChecking() {
@@ -240,15 +285,22 @@ export default {
       }
     },
 
+    async retryFailedTasks() {
+      // Reset status and start new task
+      this.resetTask();
+      await this.startLeadGeneration();
+    },
+
     resetTask() {
       this.currentGroupId = null;
       this.groupStatus = "pending";
       this.taskStatuses = null;
+      this.statusMessage = "";
       this.errors = [];
       this.warnings = [];
-      this.progressMessage = "";
       this.totalLeadsFound = 0;
       this.totalLeadsNeeded = 0;
+      this.taskErrors = {};
       this.stopStatusChecking();
     },
   },
@@ -380,77 +432,91 @@ input:focus {
 }
 
 .status-indicator {
-  font-size: 1.1rem;
-  font-weight: 500;
+  font-size: 1.2rem;
+  font-weight: 600;
   margin-bottom: 1rem;
-}
-
-.progress-message {
-  margin: 1rem 0;
-  padding: 0.75rem;
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  font-weight: 500;
-}
-
-.task-statuses {
-  margin: 1rem 0;
   padding: 1rem;
-  background-color: #f8f9fa;
   border-radius: 8px;
+  background-color: #f8f9fa;
 }
 
-.task-status {
-  margin: 0.5rem 0;
-  padding: 0.5rem;
-  background-color: white;
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+.progress-display {
+  margin: 1.5rem 0;
 }
 
 .progress-bar {
-  height: 4px;
+  height: 8px;
   background-color: #eee;
-  border-radius: 2px;
+  border-radius: 4px;
   overflow: hidden;
-  margin: 1rem 0;
+  margin: 0.5rem 0;
 }
 
 .progress-bar-inner {
   height: 100%;
   background-color: #4a90e2;
-  animation: progress 2s infinite linear;
-  transform-origin: 0% 50%;
+  transition: width 0.3s ease;
 }
 
-@keyframes progress {
-  0% {
-    transform: translateX(0) scaleX(0);
-  }
-  40% {
-    transform: translateX(0) scaleX(0.4);
-  }
-  100% {
-    transform: translateX(100%) scaleX(0.5);
-  }
+.progress-bar-inner.partial {
+  background-color: #f39c12;
 }
 
-.download-section,
-.error-section,
-.warning-section {
-  margin-top: 2rem;
+.progress-text {
+  font-size: 1rem;
+  color: #666;
+  margin-top: 0.5rem;
 }
 
-.download-button {
-  background-color: #27ae60;
+.progress-warning {
+  color: #f39c12;
+  font-weight: 500;
+  margin-left: 0.5rem;
 }
 
-.download-button:hover {
-  background-color: #219a52;
+.task-status {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background-color: #f8f9fa;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
 }
 
-.retry-button {
-  background-color: #e74c3c;
+.task-label {
+  flex: 0 0 auto;
+  margin-right: 1rem;
+}
+
+.task-status-text {
+  flex: 1;
+}
+
+.task-error-icon {
+  flex: 0 0 auto;
+  margin-left: 1rem;
+  cursor: help;
+}
+
+.task-status.completed {
+  background-color: #e8f5e9;
+  color: #2e7d32;
+}
+
+.task-status.processing {
+  background-color: #e3f2fd;
+  color: #1976d2;
+}
+
+.task-status.failed {
+  background-color: #fbe9e7;
+  color: #d32f2f;
+}
+
+.task-status.pending {
+  background-color: #f5f5f5;
+  color: #757575;
 }
 
 .retry-button:hover {
@@ -462,7 +528,7 @@ input:focus {
   background-color: #fde8e7;
   padding: 0.75rem;
   border-radius: 8px;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .warning-message {
@@ -470,7 +536,7 @@ input:focus {
   background-color: #fef5e7;
   padding: 0.75rem;
   border-radius: 8px;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 @media (max-width: 768px) {

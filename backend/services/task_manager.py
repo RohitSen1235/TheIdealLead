@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime
 import uuid
 import math
+from collections import defaultdict
 
 class TaskStatus:
     PENDING = "pending"
@@ -80,10 +81,14 @@ class TaskManager:
         total_leads_found = 0
         total_leads_needed = 0
         all_result_files = []
-        all_warnings = []
-        all_errors = []
-        combined_status = TaskStatus.COMPLETED
+        all_warnings = set()  # Use set to avoid duplicates
+        all_errors = set()    # Use set to avoid duplicates
         task_statuses = {}
+        
+        # Count active and failed tasks
+        active_tasks = 0
+        failed_tasks = 0
+        completed_tasks = 0
         
         for task_id in task_ids:
             task = self.tasks[task_id]
@@ -91,38 +96,53 @@ class TaskManager:
             total_leads_needed += task["leads_to_find"]
             
             if task["status"] == TaskStatus.FAILED:
-                combined_status = TaskStatus.FAILED
+                failed_tasks += 1
+                if task["error"]:
+                    all_errors.add(f"Task {task_ids.index(task_id) + 1}: {task['error']}")
             elif task["status"] in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
-                combined_status = TaskStatus.PROCESSING
+                active_tasks += 1
+            elif task["status"] == TaskStatus.COMPLETED:
+                completed_tasks += 1
             
             if task["result_file"]:
                 all_result_files.append(task["result_file"])
             if task["warning"]:
-                all_warnings.append(task["warning"])
-            if task["error"]:
-                all_errors.append(task["error"])
+                all_warnings.add(task["warning"])
                 
             task_statuses[task_id] = task["status"]
         
-        # Only include warnings and errors if all tasks are complete
-        final_warnings = all_warnings if combined_status in [TaskStatus.COMPLETED, TaskStatus.FAILED] else []
-        final_errors = all_errors if combined_status in [TaskStatus.COMPLETED, TaskStatus.FAILED] else []
-        
-        # Create progress message
-        progress_message = f"Found {total_leads_found} profiles out of {total_leads_needed} requested."
-        if total_leads_found < total_leads_needed and combined_status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
-            progress_message += " Exhausted all available search results."
+        # Determine overall status
+        if active_tasks > 0:
+            combined_status = TaskStatus.PROCESSING
+            status_message = f"Processing... Found {total_leads_found} profiles so far."
+        elif completed_tasks + failed_tasks == len(task_ids):
+            if failed_tasks == len(task_ids):
+                combined_status = TaskStatus.FAILED
+                status_message = "All tasks failed. Please try again."
+            else:
+                combined_status = TaskStatus.COMPLETED
+                if total_leads_found >= total_leads_needed:
+                    status_message = f"Successfully found all {total_leads_found} requested profiles!"
+                    all_warnings.clear()  # Clear warnings if we got all profiles
+                else:
+                    status_message = f"Found {total_leads_found} out of {total_leads_needed} requested profiles."
+                    if failed_tasks > 0:
+                        status_message += f" ({failed_tasks} task(s) failed)"
+        else:
+            combined_status = TaskStatus.PROCESSING
+            status_message = f"Processing... Found {total_leads_found} profiles so far."
         
         return {
             "group_id": group_id,
             "status": combined_status,
+            "status_message": status_message,
             "total_leads_found": total_leads_found,
             "total_leads_needed": total_leads_needed,
-            "progress_message": progress_message,
             "result_files": all_result_files,
-            "warnings": final_warnings,
-            "errors": final_errors,
-            "task_statuses": task_statuses
+            "warnings": sorted(all_warnings) if all_warnings else [],
+            "errors": sorted(all_errors) if all_errors else [],
+            "task_statuses": task_statuses,
+            "can_download": len(all_result_files) > 0  # Allow download if we have any results
         }
 
     async def process_task(self, task_id: str, lead_generator):
@@ -133,7 +153,7 @@ class TaskManager:
                 self.update_task_status(task_id, TaskStatus.PROCESSING)
                 
                 # Generate leads with specific range for this task
-                result_file, warning_message = await lead_generator.generate_leads(
+                result_file, message = await lead_generator.generate_leads(
                     task["icp"],
                     task["leads_to_find"],
                     task["start_index"]
@@ -141,23 +161,23 @@ class TaskManager:
                 
                 # Extract number of leads found from warning message
                 leads_found = 0
-                if warning_message:
-                    import re
-                    match = re.search(r"Found (\d+) profiles", warning_message)
-                    if match:
-                        leads_found = int(match.group(1))
+                if result_file:
+                    import csv
+                    with open(result_file, 'r') as csvfile:
+                        leads_found = sum(1 for row in csv.DictReader(csvfile))
                 
                 self.update_task_status(
                     task_id, 
                     TaskStatus.COMPLETED, 
                     result_file=result_file,
-                    warning=warning_message,
+                    warning=message if leads_found < task["leads_to_find"] else None,
                     leads_found=leads_found
                 )
                 
             except Exception as e:
                 self.update_task_status(task_id, TaskStatus.FAILED, error=str(e))
-                raise
+                # Don't raise the exception - let other tasks continue
+                return
 
     def cleanup_old_tasks(self, max_age_hours: int = 24):
         """Clean up completed or failed tasks older than specified hours"""
