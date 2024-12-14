@@ -3,7 +3,7 @@
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-content">
-        <h1>Experiance the power of AI-powered lead generation</h1>
+        <h1>Experience the power of AI-powered lead generation</h1>
         <p>
           Your journey to effective lead generation starts here. Fill out the
           form below to get started!
@@ -18,36 +18,78 @@
         Fill out the form below to initiate the lead generation process tailored
         to your Ideal Customer Profile.
         <br />
-        <span style="color: #4a90e2; font-weight: bold">
-          Note: This is a demo version, so there are restictions for
-          usage.</span
-        >
+        <span class="note">
+          Note: This is a demo version, so there are restrictions for usage.
+        </span>
       </p>
-      <form @submit.prevent="startLeadGeneration" class="lead-generation-form">
+
+      <!-- Form Section -->
+      <form
+        v-if="!currentTaskId"
+        @submit.prevent="startLeadGeneration"
+        class="lead-generation-form"
+      >
         <div class="form-group">
           <label for="icp">Ideal Customer Profile</label>
           <textarea
             v-model="icp"
             id="icp"
-            placeholder="Describe your ideal customer..."
+            placeholder="Describe your ideal customer (e.g., 'Purchasing Managers in North America working in the Aerospace industry')"
             required
           ></textarea>
         </div>
         <div class="form-group">
           <label for="numberOfLeads">Number of Leads</label>
           <input
-            v-model="numberOfLeads"
+            v-model.number="numberOfLeads"
             type="number"
             id="numberOfLeads"
-            placeholder="Expected number of leads"
+            min="1"
+            max="100"
+            placeholder="Enter number (1-100)"
             required
           />
         </div>
         <button type="submit" class="cta-button" :disabled="isSubmitting">
-          {{ isSubmitting ? "Submitting..." : "Start Lead Generation" }}
+          {{ isSubmitting ? "Starting Process..." : "Start Lead Generation" }}
         </button>
       </form>
-      <p v-if="message" class="response-message">{{ message }}</p>
+
+      <!-- Task Progress Section -->
+      <div v-else class="task-progress">
+        <h3>Lead Generation Progress</h3>
+
+        <!-- Status Display -->
+        <div class="status-container">
+          <div class="status-indicator" :class="taskStatus">
+            {{ getStatusMessage }}
+          </div>
+
+          <!-- Progress Animation -->
+          <div v-if="isProcessing" class="progress-bar">
+            <div class="progress-bar-inner"></div>
+          </div>
+
+          <!-- Warning Display -->
+          <div v-if="warningMessage" class="warning-section">
+            <p class="warning-message">{{ warningMessage }}</p>
+          </div>
+
+          <!-- Download Section -->
+          <div v-if="taskStatus === 'completed'" class="download-section">
+            <p>Your leads are ready!</p>
+            <button @click="downloadResults" class="download-button">
+              Download Leads (CSV)
+            </button>
+          </div>
+
+          <!-- Error Display -->
+          <div v-if="taskStatus === 'failed'" class="error-section">
+            <p class="error-message">{{ errorMessage }}</p>
+            <button @click="resetTask" class="retry-button">Try Again</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -60,48 +102,109 @@ export default {
     return {
       icp: "",
       numberOfLeads: null,
-      message: "",
       isSubmitting: false,
+      currentTaskId: null,
+      taskStatus: "pending",
+      errorMessage: "",
+      warningMessage: "",
+      statusCheckInterval: null,
     };
   },
+
+  computed: {
+    isProcessing() {
+      return ["pending", "processing"].includes(this.taskStatus);
+    },
+
+    getStatusMessage() {
+      const messages = {
+        pending: "Initializing lead generation...",
+        processing: "Generating leads...",
+        completed: "Lead generation completed!",
+        failed: "Lead generation failed",
+      };
+      return messages[this.taskStatus] || "Unknown status";
+    },
+  },
+
   methods: {
     async startLeadGeneration() {
       this.isSubmitting = true;
-      this.message = "";
+      this.errorMessage = "";
+      this.warningMessage = "";
+
       try {
         const response = await api.startLeadGeneration({
           ideal_customer_profile: this.icp,
-          number_of_leads: parseInt(this.numberOfLeads, 10),
+          number_of_leads: this.numberOfLeads,
         });
-        console.log("API Response:", response); // Debug log
-        this.message = response.message;
+
+        this.currentTaskId = response.task_id;
+        this.startStatusChecking();
       } catch (error) {
-        console.error("Error:", error);
-        if (error.response) {
-          // The request was made and the server responded with a status code
-          // that falls out of the range of 2xx
-          this.message = `Error: ${
-            error.response.message || "An error occurred on the server."
-          }`;
-        } else if (error.request) {
-          // The request was made but no response was received
-          this.message =
-            "Error: No response received from the server. Please try again later.";
-        } else {
-          // Something happened in setting up the request that triggered an Error
-          this.message =
-            "Error: Failed to send request. Please try again later.";
-        }
+        this.errorMessage = error.message;
       } finally {
         this.isSubmitting = false;
       }
     },
+
+    async checkTaskStatus() {
+      if (!this.currentTaskId) return;
+
+      try {
+        const status = await api.getTaskStatus(this.currentTaskId);
+        this.taskStatus = status.status;
+        this.errorMessage = status.error || "";
+        this.warningMessage = status.warning || "";
+
+        // Stop checking if task is completed or failed
+        if (["completed", "failed"].includes(status.status)) {
+          this.stopStatusChecking();
+        }
+      } catch (error) {
+        console.error("Error checking task status:", error);
+        this.errorMessage = error.message;
+        this.stopStatusChecking();
+      }
+    },
+
+    startStatusChecking() {
+      this.statusCheckInterval = setInterval(() => {
+        this.checkTaskStatus();
+      }, 2000); // Check every 2 seconds
+    },
+
+    stopStatusChecking() {
+      if (this.statusCheckInterval) {
+        clearInterval(this.statusCheckInterval);
+        this.statusCheckInterval = null;
+      }
+    },
+
+    async downloadResults() {
+      try {
+        await api.downloadResults(this.currentTaskId);
+      } catch (error) {
+        this.errorMessage = error.message;
+      }
+    },
+
+    resetTask() {
+      this.currentTaskId = null;
+      this.taskStatus = "pending";
+      this.errorMessage = "";
+      this.warningMessage = "";
+      this.stopStatusChecking();
+    },
+  },
+
+  beforeUnmount() {
+    this.stopStatusChecking();
   },
 };
 </script>
 
 <style scoped>
-/* Hero Section Styles */
 .hero {
   background: linear-gradient(135deg, #4a90e2 0%, #50e3c2 100%);
   color: white;
@@ -118,7 +221,6 @@ export default {
   font-size: 1.2rem;
 }
 
-/* Demo Container Styles */
 .demo-container {
   max-width: 600px;
   margin: 2rem auto;
@@ -129,22 +231,28 @@ export default {
   color: #333;
 }
 
-h2 {
-  text-align: center;
-  margin-bottom: 1rem;
-  font-size: 2rem;
+.note {
+  color: #4a90e2;
+  font-weight: bold;
 }
 
-p {
+h2,
+h3 {
   text-align: center;
-  margin-bottom: 2rem;
-  font-size: 1rem;
+  margin-bottom: 1rem;
+  color: #2c3e50;
+}
+
+h2 {
+  font-size: 2rem;
+}
+h3 {
+  font-size: 1.5rem;
 }
 
 .lead-generation-form {
   display: flex;
   flex-direction: column;
-  /* align-items: center; */
 }
 
 .form-group {
@@ -155,27 +263,35 @@ label {
   display: block;
   margin-bottom: 0.5rem;
   font-weight: bold;
+  color: #34495e;
 }
 
 textarea,
 input {
   width: 100%;
-  padding: 0.75rem; /* Adjust padding for equal spacing */
-  border: 2px solid rgba(0, 0, 0, 0.2);
+  padding: 0.75rem;
+  border: 2px solid rgba(0, 0, 0, 0.1);
   border-radius: 8px;
   font-size: 1rem;
   transition: all 0.3s ease;
-  box-sizing: border-box; /* Ensure padding is included in width */
+  background-color: white;
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
 }
 
 textarea:focus,
 input:focus {
   outline: none;
   border-color: #4a90e2;
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.3);
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
 }
 
-.cta-button {
+.cta-button,
+.download-button,
+.retry-button {
   background-color: #4a90e2;
   color: white;
   border: none;
@@ -185,17 +301,108 @@ input:focus {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.3s ease;
-  margin-top: 1rem;
 }
 
-.cta-button:hover {
-  background-color: #2980b9;
+.cta-button:hover,
+.download-button:hover,
+.retry-button:hover {
+  background-color: #357abd;
+  transform: translateY(-2px);
 }
 
-.response-message {
+.cta-button:disabled {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.task-progress {
   text-align: center;
-  margin-top: 1rem;
-  font-size: 1rem;
-  color: #f39c12; /* Change color for visibility */
+}
+
+.status-container {
+  margin-top: 2rem;
+}
+
+.status-indicator {
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin-bottom: 1rem;
+}
+
+.progress-bar {
+  height: 4px;
+  background-color: #eee;
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 1rem 0;
+}
+
+.progress-bar-inner {
+  height: 100%;
+  background-color: #4a90e2;
+  animation: progress 2s infinite linear;
+  transform-origin: 0% 50%;
+}
+
+@keyframes progress {
+  0% {
+    transform: translateX(0) scaleX(0);
+  }
+  40% {
+    transform: translateX(0) scaleX(0.4);
+  }
+  100% {
+    transform: translateX(100%) scaleX(0.5);
+  }
+}
+
+.download-section,
+.error-section,
+.warning-section {
+  margin-top: 2rem;
+}
+
+.download-button {
+  background-color: #27ae60;
+}
+
+.download-button:hover {
+  background-color: #219a52;
+}
+
+.retry-button {
+  background-color: #e74c3c;
+}
+
+.retry-button:hover {
+  background-color: #c0392b;
+}
+
+.error-message {
+  color: #e74c3c;
+  background-color: #fde8e7;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.warning-message {
+  color: #f39c12;
+  background-color: #fef5e7;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 768px) {
+  .demo-container {
+    margin: 1rem;
+    padding: 1.5rem;
+  }
+
+  .hero-content h1 {
+    font-size: 2rem;
+  }
 }
 </style>

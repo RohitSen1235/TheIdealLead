@@ -46,6 +46,12 @@
           required
         />
       </div>
+      <div v-if="errorMessage" class="error-message">
+        {{ errorMessage }}
+      </div>
+      <div v-if="successMessage" class="success-message">
+        {{ successMessage }}
+      </div>
       <button type="submit" class="cta-button" :disabled="isSubmitting">
         {{ isSubmitting ? "Submitting..." : "Sign Up" }}
       </button>
@@ -65,11 +71,16 @@ export default {
       company: "",
       phone: "",
       isSubmitting: false,
+      errorMessage: "",
+      successMessage: "",
     };
   },
   methods: {
     async submitLead() {
       this.isSubmitting = true;
+      this.errorMessage = "";
+      this.successMessage = "";
+
       try {
         const response = await api.submitLead({
           name: this.name,
@@ -77,20 +88,22 @@ export default {
           company: this.company,
           phone: this.phone,
         });
-        console.log("Lead submitted successfully:", response);
+
         // Reset form fields
         this.name = "";
         this.email = "";
         this.company = "";
         this.phone = "";
-        // Show success message to the user
-        alert("Thank you for your interest! We will be in touch soon.");
+
+        // Show success message
+        this.successMessage =
+          response.message ||
+          "Thank you for your interest! We will be in touch soon.";
       } catch (error) {
         console.error("Error submitting lead:", error);
-        // Show error message to the user
-        alert(
-          "There was an error submitting your information. Please try again."
-        );
+        this.errorMessage =
+          error.message ||
+          "There was an error submitting your information. Please try again.";
       } finally {
         this.isSubmitting = false;
       }
@@ -105,7 +118,6 @@ export default {
   margin: 0 auto;
   padding: 2rem;
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  /* background: linear-gradient(135deg, #4a90e2 0%, #50e3c2 100%); */
   border-radius: 20px;
   box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
 }
@@ -151,13 +163,33 @@ input {
   font-size: 1rem;
   transition: all 0.3s ease;
   background-color: rgba(255, 255, 255, 0.8);
-  box-sizing: border-box; /* This ensures padding is included in the width */
+  box-sizing: border-box;
 }
 
 input:focus {
   outline: none;
   border-color: #3498db;
   box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.3);
+}
+
+.error-message {
+  color: #e74c3c;
+  background-color: #fde8e7;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.success-message {
+  color: #27ae60;
+  background-color: #e8f5e9;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  text-align: center;
+  font-size: 0.9rem;
 }
 
 .cta-button {
