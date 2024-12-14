@@ -7,11 +7,13 @@ from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.exc import IntegrityError   
 from typing import Optional
+import pandas as pd
+import tempfile
+import os
 
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import smtplib
-import os
 
 # Import internal modules
 from config import settings
@@ -146,22 +148,25 @@ async def read_root():
 @app.post("/start-lead-generation/")
 async def start_lead_generation(request: LeadGenerationRequest, background_tasks: BackgroundTasks):
     try:
-        # Create a new task
-        task_id = task_manager.create_task(
+        # Create distributed tasks
+        group_id = task_manager.create_distributed_tasks(
             icp=request.ideal_customer_profile,
             num_leads=request.number_of_leads
         )
         
-        # Start processing in background
-        background_tasks.add_task(
-            task_manager.process_task,
-            task_id,
-            lead_generator
-        )
+        # Start processing each task in the group
+        group_status = task_manager.get_group_status(group_id)
+        for task_id in group_status["task_statuses"].keys():
+            background_tasks.add_task(
+                task_manager.process_task,
+                task_id,
+                lead_generator
+            )
         
         return {
             "message": "Lead generation process has started.",
-            "task_id": task_id
+            "group_id": group_id,
+            "task_ids": list(group_status["task_statuses"].keys())
         }
         
     except Exception as e:
@@ -169,28 +174,62 @@ async def start_lead_generation(request: LeadGenerationRequest, background_tasks
 
 @app.get("/task-status/{task_id}")
 async def get_task_status(task_id: str):
+    # First try to get individual task status
     status = task_manager.get_task_status(task_id)
-    if not status:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return status
+    if status:
+        return status
+        
+    # If not found, try to get group status
+    status = task_manager.get_group_status(task_id)  # task_id might be a group_id
+    if status:
+        return status
+        
+    raise HTTPException(status_code=404, detail="Task or group not found")
 
-@app.get("/download-results/{task_id}")
-async def download_results(task_id: str):
-    status = task_manager.get_task_status(task_id)
-    if not status:
-        raise HTTPException(status_code=404, detail="Task not found")
+@app.get("/download-results/{group_id}")
+async def download_results(group_id: str):
+    # Get group status
+    group_status = task_manager.get_group_status(group_id)
+    if not group_status:
+        raise HTTPException(status_code=404, detail="Group not found")
         
-    if status["status"] != TaskStatus.COMPLETED:
-        raise HTTPException(status_code=400, detail="Task not completed yet")
+    if group_status["status"] != TaskStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Not all tasks in group completed yet")
         
-    if not status["result_file"] or not os.path.exists(status["result_file"]):
-        raise HTTPException(status_code=404, detail="Result file not found")
+    if not group_status["result_files"]:
+        raise HTTPException(status_code=404, detail="No result files found")
+    
+    try:
+        # Read and combine all CSV files
+        all_data = []
+        for file_path in group_status["result_files"]:
+            if os.path.exists(file_path):
+                df = pd.read_csv(file_path)
+                all_data.append(df)
         
-    return FileResponse(
-        status["result_file"],
-        media_type="text/csv",
-        filename=os.path.basename(status["result_file"])
-    )
+        if not all_data:
+            raise HTTPException(status_code=404, detail="No valid result files found")
+            
+        # Combine all dataframes
+        combined_df = pd.concat(all_data, ignore_index=True)
+        
+        # Create a temporary file for the combined results
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.csv') as tmp_file:
+            combined_df.to_csv(tmp_file.name, index=False)
+            
+            # Create a meaningful filename
+            timestamp = group_status["result_files"][0].split("_")[-1]  # Get timestamp from first file
+            filename = f"combined_leads_{timestamp}"
+            
+            return FileResponse(
+                tmp_file.name,
+                media_type="text/csv",
+                filename=filename,
+                background=BackgroundTasks().add_task(os.unlink, tmp_file.name)  # Delete temp file after sending
+            )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error combining results: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

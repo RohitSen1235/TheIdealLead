@@ -1,19 +1,100 @@
 import asyncio
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Optional
 import aiohttp
 from bs4 import BeautifulSoup
 import os
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 import groq
 from urllib.parse import quote_plus, unquote
 import json
 from config import settings
 import logging
+import random
+from collections import defaultdict
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+class ProxyManager:
+    def __init__(self, proxies: List[Dict[str, str]]):
+        self.proxies = proxies
+        self.current_index = 0
+        self.error_counts = defaultdict(int)
+        self.cooldown_until = defaultdict(lambda: datetime.min)
+        self.success_counts = defaultdict(int)
+        self.last_used = defaultdict(lambda: datetime.min)
+        
+        # Configuration
+        self.max_errors = 3  # Max errors before cooldown
+        self.cooldown_minutes = 5  # Cooldown period in minutes
+        self.min_delay = 1  # Minimum seconds between requests per proxy
+        
+        logger.info(f"Initialized ProxyManager with {len(proxies)} proxies")
+
+    def _get_proxy_key(self, proxy: Dict[str, str]) -> str:
+        """Generate a unique key for a proxy"""
+        return proxy['url']
+
+    async def get_next_proxy(self) -> Tuple[Optional[Dict[str, str]], Optional[aiohttp.BasicAuth]]:
+        """Get the next available proxy with the least errors/cooldown"""
+        if not self.proxies:
+            return None, None
+
+        now = datetime.now()
+        available_proxies = []
+
+        # Find available proxies (not in cooldown and not recently used)
+        for proxy in self.proxies:
+            proxy_key = self._get_proxy_key(proxy)
+            if (now >= self.cooldown_until[proxy_key] and 
+                (now - self.last_used[proxy_key]).total_seconds() >= self.min_delay):
+                available_proxies.append(proxy)
+
+        if not available_proxies:
+            # If no proxies are available, wait for the one with shortest cooldown
+            min_wait = min((self.cooldown_until[self._get_proxy_key(p)] - now).total_seconds() 
+                         for p in self.proxies)
+            if min_wait > 0:
+                await asyncio.sleep(min_wait)
+            return await self.get_next_proxy()
+
+        # Sort by error count and success rate
+        proxy = min(available_proxies, key=lambda p: (
+            self.error_counts[self._get_proxy_key(p)],
+            -self.success_counts[self._get_proxy_key(p)]
+        ))
+
+        # Create auth if needed
+        auth = None
+        if proxy.get('username') and proxy.get('password'):
+            auth = aiohttp.BasicAuth(
+                login=proxy['username'],
+                password=proxy['password']
+            )
+
+        # Update last used time
+        self.last_used[self._get_proxy_key(proxy)] = now
+        
+        return proxy, auth
+
+    def mark_success(self, proxy: Dict[str, str]):
+        """Mark a proxy as successful"""
+        proxy_key = self._get_proxy_key(proxy)
+        self.success_counts[proxy_key] += 1
+        self.error_counts[proxy_key] = max(0, self.error_counts[proxy_key] - 1)  # Reduce error count on success
+
+    def mark_error(self, proxy: Dict[str, str]):
+        """Mark a proxy as failed"""
+        proxy_key = self._get_proxy_key(proxy)
+        self.error_counts[proxy_key] += 1
+        
+        # If too many errors, put proxy in cooldown
+        if self.error_counts[proxy_key] >= self.max_errors:
+            self.cooldown_until[proxy_key] = datetime.now() + timedelta(minutes=self.cooldown_minutes)
+            logger.warning(f"Proxy {proxy['url']} placed in cooldown until {self.cooldown_until[proxy_key]}")
+            self.error_counts[proxy_key] = 0  # Reset error count after cooldown
 
 class LeadGenerator:
     def __init__(self):
@@ -27,13 +108,12 @@ class LeadGenerator:
         if not os.path.exists(self.results_dir):
             os.makedirs(self.results_dir)
 
-        # Log proxy configuration status
-        if settings.is_proxy_configured:
-            logger.info(f"Proxy configured: {settings.PROXY_URL}")
-            if settings.PROXY_USERNAME:
-                logger.info("Proxy authentication enabled")
+        # Initialize proxy manager if proxies are configured
+        self.proxy_manager = ProxyManager(settings.PROXY_URLS) if settings.is_proxy_configured else None
+        if self.proxy_manager:
+            logger.info(f"Initialized with {len(settings.PROXY_URLS)} proxies")
         else:
-            logger.warning("No proxy configured - Google rate limiting may occur")
+            logger.warning("No proxies configured - Google rate limiting may occur")
 
     async def process_icp_to_search_query(self, icp: str) -> List[str]:
         """Convert ICP description to multiple Google search queries using Groq AI"""
@@ -124,8 +204,59 @@ class LeadGenerator:
             logger.error(f"Error extracting LinkedIn URL: {str(e)}")
             return None
 
-    async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int) -> Tuple[List[dict], str]:
-        """Scrape LinkedIn profiles from Google search results with pagination. Returns (profiles, reason)"""
+    async def make_request(self, session: aiohttp.ClientSession, url: str, headers: Dict[str, str]) -> Tuple[str, bool]:
+        """Make a request with proxy rotation and error handling"""
+        max_retries = 3
+        current_retry = 0
+        
+        while current_retry < max_retries:
+            if self.proxy_manager:
+                proxy, auth = await self.proxy_manager.get_next_proxy()
+                if not proxy:
+                    logger.error("No proxies available")
+                    raise ValueError("No proxies available")
+                
+                request_kwargs = {
+                    'headers': headers,
+                    'proxy': proxy['url']
+                }
+                if auth:
+                    request_kwargs['proxy_auth'] = auth
+                
+                try:
+                    async with session.get(url, **request_kwargs) as response:
+                        if response.status == 200:
+                            html = await response.text()
+                            if "unusual traffic" not in html.lower() and "captcha" not in html.lower():
+                                self.proxy_manager.mark_success(proxy)
+                                return html, True
+                        
+                        self.proxy_manager.mark_error(proxy)
+                        logger.warning(f"Request failed with proxy {proxy['url']}, status: {response.status}")
+                        
+                except Exception as e:
+                    self.proxy_manager.mark_error(proxy)
+                    logger.error(f"Error with proxy {proxy['url']}: {str(e)}")
+            
+            else:
+                # No proxy available, make direct request
+                try:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            html = await response.text()
+                            if "unusual traffic" not in html.lower() and "captcha" not in html.lower():
+                                return html, True
+                except Exception as e:
+                    logger.error(f"Error making direct request: {str(e)}")
+            
+            current_retry += 1
+            if current_retry < max_retries:
+                await asyncio.sleep(random.uniform(1, 3))  # Random delay between retries
+        
+        return "", False
+
+    async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int, start_index: int = 0) -> Tuple[List[dict], str]:
+        """Scrape LinkedIn profile URLs from Google search results. Returns (profiles, reason)"""
         profiles = []
         seen_urls = set()  # Track seen URLs to avoid duplicates
         stop_reason = ""
@@ -134,128 +265,79 @@ class LeadGenerator:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
 
-        # Configure proxy if available
-        proxy_auth = None
-        if settings.is_proxy_configured:
-            if settings.PROXY_USERNAME and settings.PROXY_PASSWORD:
-                proxy_auth = aiohttp.BasicAuth(
-                    login=settings.PROXY_USERNAME,
-                    password=settings.PROXY_PASSWORD
-                )
-                logger.info("Using authenticated proxy connection")
-            else:
-                logger.info("Using non-authenticated proxy connection")
-
-        # Configure timeout and delays
+        # Configure timeout
         timeout = aiohttp.ClientTimeout(total=30)  # 30 second timeout
-        delay = 1 if settings.is_proxy_configured else 2  # Reduced delay with proxy
-        max_pages = 10  # Reduced from 10 to 5 pages per query
-        max_empty_pages = 2  # Reduced from 3 to 2 consecutive empty pages
+        max_pages = 10
+        max_empty_pages = 2
         
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for query_index, search_query in enumerate(search_queries, 1):
-                logger.info(f"Processing query {query_index}/{len(search_queries)}")
+                logger.info(f"Processing query {query_index}/{len(search_queries)} for profiles {start_index+1} to {start_index+num_leads}")
                 if len(profiles) >= num_leads:
                     break
                     
                 encoded_query = quote_plus(search_query)
-                start_index = 0
+                google_start_index = 0
                 consecutive_empty_pages = 0
                 
                 while len(profiles) < num_leads and consecutive_empty_pages < max_empty_pages:
-                    google_url = f"https://www.google.com/search?q={encoded_query}&start={start_index}"
-                    logger.info(f"Searching page {(start_index//10) + 1} for query {query_index}")
+                    google_url = f"https://www.google.com/search?q={encoded_query}&start={google_start_index}"
+                    logger.info(f"Searching page {(google_start_index//10) + 1} for query {query_index}")
                     
-                    try:
-                        # Add delay between requests to avoid rate limiting
-                        await asyncio.sleep(delay)
-                        
-                        # Configure request with proxy if available
-                        request_kwargs = {'headers': headers}
-                        if settings.is_proxy_configured:
-                            request_kwargs['proxy'] = settings.PROXY_URL
-                            if proxy_auth:
-                                request_kwargs['proxy_auth'] = proxy_auth
-                            logger.info(f"Making request through proxy: {settings.PROXY_URL}")
+                    html, success = await self.make_request(session, google_url, headers)
+                    if not success:
+                        stop_reason = "Failed to fetch search results. Consider checking proxy configuration."
+                        break
 
-                        async with session.get(google_url, **request_kwargs) as response:
-                            if response.status == 200:
-                                if settings.is_proxy_configured:
-                                    logger.info("Successful proxy request to Google")
-                                html = await response.text()
-                                
-                                # Check for Google rate limiting or blocking
-                                if "unusual traffic" in html.lower() or "captcha" in html.lower():
-                                    if settings.is_proxy_configured:
-                                        logger.error("Google's security check triggered even with proxy")
-                                        stop_reason = "Google's security check was triggered even with proxy. Consider using a different proxy or reducing request frequency."
-                                    else:
-                                        logger.error("Google's security check triggered - no proxy configured")
-                                        stop_reason = "Google's security check was triggered. Consider configuring a proxy service."
-                                    break
-                                
-                                soup = BeautifulSoup(html, 'html.parser')
-                                
-                                # Check if we've hit the last page
-                                if "did not match any documents" in html:
-                                    if start_index == 0:
-                                        stop_reason = f"No search results found for query variation {query_index}."
-                                    else:
-                                        stop_reason = f"Reached end of search results for query variation {query_index}."
-                                    break
-                                
-                                # Find all search result links
-                                links = soup.find_all('a')
-                                found_valid_links = False
-                                
-                                for link in links:
-                                    href = link.get('href', '')
-                                    if 'linkedin.com/in/' in href:
-                                        linkedin_url = self.extract_linkedin_url(href)
-                                        
-                                        if linkedin_url and self.is_valid_linkedin_profile_url(linkedin_url):
-                                            if linkedin_url not in seen_urls:
-                                                found_valid_links = True
-                                                seen_urls.add(linkedin_url)
-                                                profiles.append({
-                                                    'profile_url': linkedin_url,
-                                                    'timestamp': datetime.now().isoformat()
-                                                })
-                                                logger.info(f"Found profile {len(profiles)}/{num_leads}")
-                                                
-                                                if len(profiles) >= num_leads:
-                                                    break
-                                
-                                if not found_valid_links:
-                                    consecutive_empty_pages += 1
-                                    logger.info(f"No new profiles found on this page ({consecutive_empty_pages}/{max_empty_pages} empty pages)")
-                                else:
-                                    consecutive_empty_pages = 0
-                                
-                                # Move to next page
-                                start_index += 10
-                            else:
-                                logger.error(f"HTTP {response.status} error from Google")
-                                stop_reason = f"Received HTTP {response.status} error from Google. Search stopped."
-                                break
-                                
-                    except asyncio.TimeoutError:
-                        logger.error("Request timed out")
-                        stop_reason = "Request timed out. Consider checking proxy connection or internet stability."
+                    # Check for end of results
+                    if "did not match any documents" in html:
+                        if google_start_index == 0:
+                            stop_reason = f"No search results found for query variation {query_index}."
+                        else:
+                            stop_reason = f"Reached end of search results for query variation {query_index}."
                         break
-                    except Exception as e:
-                        logger.error(f"Error during search: {str(e)}")
-                        stop_reason = f"Error during search: {str(e)}"
-                        break
-                        
+
+                    soup = BeautifulSoup(html, 'html.parser')
+                    links = soup.find_all('a')
+                    found_valid_links = False
+
+                    for link in links:
+                        href = link.get('href', '')
+                        if 'linkedin.com/in/' in href:
+                            linkedin_url = self.extract_linkedin_url(href)
+                            
+                            if linkedin_url and self.is_valid_linkedin_profile_url(linkedin_url):
+                                if linkedin_url not in seen_urls:
+                                    found_valid_links = True
+                                    seen_urls.add(linkedin_url)
+                                    
+                                    profile_data = {
+                                        'profile_url': linkedin_url,
+                                        'name': '',  # Temporarily disabled
+                                        'organization': '',  # Temporarily disabled
+                                        'designation': '',  # Temporarily disabled
+                                        'timestamp': datetime.now().isoformat()
+                                    }
+                                    
+                                    profiles.append(profile_data)
+                                    logger.info(f"Found profile {start_index + len(profiles)}")
+                                    
+                                    if len(profiles) >= num_leads:
+                                        break
+
+                    if not found_valid_links:
+                        consecutive_empty_pages += 1
+                        logger.info(f"No new profiles found on this page ({consecutive_empty_pages}/{max_empty_pages} empty pages)")
+                    else:
+                        consecutive_empty_pages = 0
+                    
+                    # Move to next page
+                    google_start_index += 10
+                    
                     # Break if we've gone through too many pages
-                    if start_index >= max_pages * 10:
+                    if google_start_index >= max_pages * 10:
                         stop_reason = f"Reached maximum page limit ({max_pages} pages) for the current search query."
                         break
-                
-                # If we hit a rate limit, stop trying more queries
-                if "security check" in stop_reason.lower():
-                    break
         
         # Determine final reason if we haven't found any profiles
         if len(profiles) == 0 and not stop_reason:
@@ -268,28 +350,28 @@ class LeadGenerator:
             
         return profiles, stop_reason
 
-    async def generate_leads(self, icp: str, num_leads: int) -> Tuple[str, str]:
+    async def generate_leads(self, icp: str, num_leads: int, start_index: int = 0) -> Tuple[str, str]:
         """Main method to generate leads. Returns tuple of (filepath, message)"""
         try:
-            logger.info(f"Starting lead generation for ICP: {icp[:50]}...")
+            logger.info(f"Starting lead generation for ICP: {icp[:50]}... (profiles {start_index+1} to {start_index+num_leads})")
             # Convert ICP to multiple search queries
             search_queries = await self.process_icp_to_search_query(icp)
             
             # Scrape profiles using multiple queries
-            profiles, stop_reason = await self.scrape_linkedin_profiles(search_queries, num_leads)
+            profiles, stop_reason = await self.scrape_linkedin_profiles(search_queries, num_leads, start_index)
             
             # Always save whatever profiles we found
             if profiles:
-                # Generate unique filename with ICP summary
+                # Generate unique filename with ICP summary and range
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 # Create a short summary from ICP (first 30 chars)
                 icp_summary = icp.replace(" ", "_")[:30].lower()
-                filename = f"ICP_{icp_summary}_{timestamp}.csv"
+                filename = f"ICP_{icp_summary}_{start_index+1}_to_{start_index+len(profiles)}_{timestamp}.csv"
                 filepath = os.path.join(self.results_dir, filename)
                 
-                # Save results to CSV
+                # Save results to CSV with new fields
                 with open(filepath, 'w', newline='') as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=['profile_url', 'timestamp'])
+                    writer = csv.DictWriter(csvfile, fieldnames=['profile_url', 'name', 'organization', 'designation', 'timestamp'])
                     writer.writeheader()
                     writer.writerows(profiles)
                 

@@ -25,7 +25,7 @@
 
       <!-- Form Section -->
       <form
-        v-if="!currentTaskId"
+        v-if="!currentGroupId"
         @submit.prevent="startLeadGeneration"
         class="lead-generation-form"
       >
@@ -61,8 +61,19 @@
 
         <!-- Status Display -->
         <div class="status-container">
-          <div class="status-indicator" :class="taskStatus">
+          <div class="status-indicator" :class="groupStatus">
             {{ getStatusMessage }}
+          </div>
+
+          <!-- Task Status Display -->
+          <div v-if="taskStatuses" class="task-statuses">
+            <div
+              v-for="(status, taskId) in taskStatuses"
+              :key="taskId"
+              class="task-status"
+            >
+              Task {{ getTaskNumber(taskId) }}: {{ status }}
+            </div>
           </div>
 
           <!-- Progress Animation -->
@@ -71,12 +82,18 @@
           </div>
 
           <!-- Warning Display -->
-          <div v-if="warningMessage" class="warning-section">
-            <p class="warning-message">{{ warningMessage }}</p>
+          <div v-if="warnings && warnings.length" class="warning-section">
+            <p
+              v-for="(warning, index) in warnings"
+              :key="index"
+              class="warning-message"
+            >
+              {{ warning }}
+            </p>
           </div>
 
           <!-- Download Section -->
-          <div v-if="taskStatus === 'completed'" class="download-section">
+          <div v-if="groupStatus === 'completed'" class="download-section">
             <p>Your leads are ready!</p>
             <button @click="downloadResults" class="download-button">
               Download Leads (CSV)
@@ -84,7 +101,7 @@
           </div>
 
           <!-- Error Display -->
-          <div v-if="taskStatus === 'failed'" class="error-section">
+          <div v-if="groupStatus === 'failed'" class="error-section">
             <p class="error-message">{{ errorMessage }}</p>
             <button @click="resetTask" class="retry-button">Try Again</button>
           </div>
@@ -103,17 +120,18 @@ export default {
       icp: "",
       numberOfLeads: null,
       isSubmitting: false,
-      currentTaskId: null,
-      taskStatus: "pending",
+      currentGroupId: null,
+      groupStatus: "pending",
+      taskStatuses: null,
       errorMessage: "",
-      warningMessage: "",
+      warnings: [],
       statusCheckInterval: null,
     };
   },
 
   computed: {
     isProcessing() {
-      return ["pending", "processing"].includes(this.taskStatus);
+      return ["pending", "processing"].includes(this.groupStatus);
     },
 
     getStatusMessage() {
@@ -123,7 +141,7 @@ export default {
         completed: "Lead generation completed!",
         failed: "Lead generation failed",
       };
-      return messages[this.taskStatus] || "Unknown status";
+      return messages[this.groupStatus] || "Unknown status";
     },
   },
 
@@ -131,7 +149,7 @@ export default {
     async startLeadGeneration() {
       this.isSubmitting = true;
       this.errorMessage = "";
-      this.warningMessage = "";
+      this.warnings = [];
 
       try {
         const response = await api.startLeadGeneration({
@@ -139,7 +157,7 @@ export default {
           number_of_leads: this.numberOfLeads,
         });
 
-        this.currentTaskId = response.task_id;
+        this.currentGroupId = response.group_id;
         this.startStatusChecking();
       } catch (error) {
         this.errorMessage = error.message;
@@ -149,15 +167,19 @@ export default {
     },
 
     async checkTaskStatus() {
-      if (!this.currentTaskId) return;
+      if (!this.currentGroupId) return;
 
       try {
-        const status = await api.getTaskStatus(this.currentTaskId);
-        this.taskStatus = status.status;
-        this.errorMessage = status.error || "";
-        this.warningMessage = status.warning || "";
+        const status = await api.getTaskStatus(this.currentGroupId);
+        this.groupStatus = status.status;
+        this.taskStatuses = status.task_statuses;
+        this.warnings = status.warnings || [];
 
-        // Stop checking if task is completed or failed
+        if (status.error) {
+          this.errorMessage = status.error;
+        }
+
+        // Stop checking if group is completed or failed
         if (["completed", "failed"].includes(status.status)) {
           this.stopStatusChecking();
         }
@@ -166,6 +188,12 @@ export default {
         this.errorMessage = error.message;
         this.stopStatusChecking();
       }
+    },
+
+    getTaskNumber(taskId) {
+      // Get task number from task statuses object keys
+      const taskIds = Object.keys(this.taskStatuses);
+      return taskIds.indexOf(taskId) + 1;
     },
 
     startStatusChecking() {
@@ -183,17 +211,18 @@ export default {
 
     async downloadResults() {
       try {
-        await api.downloadResults(this.currentTaskId);
+        await api.downloadResults(this.currentGroupId);
       } catch (error) {
         this.errorMessage = error.message;
       }
     },
 
     resetTask() {
-      this.currentTaskId = null;
-      this.taskStatus = "pending";
+      this.currentGroupId = null;
+      this.groupStatus = "pending";
+      this.taskStatuses = null;
       this.errorMessage = "";
-      this.warningMessage = "";
+      this.warnings = [];
       this.stopStatusChecking();
     },
   },
@@ -328,6 +357,21 @@ input:focus {
   font-size: 1.1rem;
   font-weight: 500;
   margin-bottom: 1rem;
+}
+
+.task-statuses {
+  margin: 1rem 0;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.task-status {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  background-color: white;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .progress-bar {

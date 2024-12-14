@@ -14,12 +14,27 @@ const api = axios.create({
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    console.error("API Error:", {
-      status: error.response?.status,
-      data: error.response?.data,
-      message: error.message,
-    });
-    throw error;
+    // If the error response is a blob (failed download), convert it to JSON
+    if (error.response?.data instanceof Blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            error.response.data = JSON.parse(reader.result);
+            reject(error);
+          } catch (e) {
+            error.response.data = { message: "Failed to parse error response" };
+            reject(error);
+          }
+        };
+        reader.onerror = () => {
+          error.response.data = { message: "Failed to read error response" };
+          reject(error);
+        };
+        reader.readAsText(error.response.data);
+      });
+    }
+    return Promise.reject(error);
   }
 );
 
@@ -60,9 +75,9 @@ export default {
     }
   },
 
-  async getTaskStatus(taskId) {
+  async getTaskStatus(groupId) {
     try {
-      const response = await api.get(`/task-status/${taskId}`);
+      const response = await api.get(`/task-status/${groupId}`);
       return response.data;
     } catch (error) {
       if (error.response) {
@@ -79,24 +94,32 @@ export default {
     }
   },
 
-  async downloadResults(taskId) {
+  async downloadResults(groupId) {
     try {
-      const response = await api.get(`/download-results/${taskId}`, {
+      const response = await api.get(`/download-results/${groupId}`, {
         responseType: "blob",
       });
+
+      // Check if the response is actually an error (non-blob)
+      const contentType = response.headers["content-type"];
+      if (contentType && !contentType.includes("text/csv")) {
+        throw new Error("Invalid response format");
+      }
 
       // Get filename from Content-Disposition header if available
       let filename = "leads.csv";
       const disposition = response.headers["content-disposition"];
       if (disposition && disposition.includes("filename=")) {
         const filenameMatch = disposition.match(/filename=(.+)/);
-        if (filenameMatch.length > 1) {
+        if (filenameMatch && filenameMatch.length > 1) {
           filename = filenameMatch[1].replace(/["']/g, "");
         }
       }
 
       // Create blob link to download
-      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const url = window.URL.createObjectURL(
+        new Blob([response.data], { type: "text/csv" })
+      );
       const link = document.createElement("a");
       link.href = url;
       link.setAttribute("download", filename);
@@ -109,11 +132,13 @@ export default {
 
       // Clean up and remove the link
       link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       if (error.response) {
-        throw new Error(
-          error.response.data.message || "Failed to download results"
-        );
+        // Try to parse error message from response
+        const errorMessage =
+          error.response.data?.message || "Failed to download results";
+        throw new Error(errorMessage);
       } else if (error.request) {
         throw new Error(
           "No response from server. Please check your connection."

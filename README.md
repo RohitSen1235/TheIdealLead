@@ -28,6 +28,20 @@ The.Ideal.Leads is an innovative, AI-driven lead generation platform designed to
    - Custom Ideal Customer Profile (ICP) input
    - Automated lead generation process
    - Real-time processing status updates
+   - Multi-Query Search System:
+     * Generates 3 unique search queries from each ICP using Groq AI
+     * Each query uses different combinations of terms to maximize relevant results
+     * Example for "Sales managers in tech companies in London":
+       - Query 1: "site:linkedin.com/in/ (Sales Manager OR Sales Director) AND (Technology OR Software) AND London"
+       - Query 2: "site:linkedin.com/in/ (Head of Sales OR Sales Lead) AND (Tech OR SaaS) AND (London OR Greater London)"
+       - Query 3: "site:linkedin.com/in/ (Sales Leadership OR Sales Management) AND (Technology Industry) AND (London UK)"
+     * System processes each query's search results until enough leads are found
+     * Automatically extracts profile information:
+       - Name
+       - Current designation
+       - Organization/Company
+       - LinkedIn Profile URL
+     * Results are saved in CSV format for easy access
 
 2. **Lead Management System**
    - Validated email addresses
