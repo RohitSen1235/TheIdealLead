@@ -9,6 +9,11 @@ import groq
 from urllib.parse import quote_plus, unquote
 import json
 from config import settings
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class LeadGenerator:
     def __init__(self):
@@ -22,9 +27,18 @@ class LeadGenerator:
         if not os.path.exists(self.results_dir):
             os.makedirs(self.results_dir)
 
+        # Log proxy configuration status
+        if settings.is_proxy_configured:
+            logger.info(f"Proxy configured: {settings.PROXY_URL}")
+            if settings.PROXY_USERNAME:
+                logger.info("Proxy authentication enabled")
+        else:
+            logger.warning("No proxy configured - Google rate limiting may occur")
+
     async def process_icp_to_search_query(self, icp: str) -> List[str]:
         """Convert ICP description to multiple Google search queries using Groq AI"""
         try:
+            logger.info("Generating search queries from ICP...")
             prompt = f"""
             Convert this Ideal Customer Profile description into 3 different Google search queries that will find LinkedIn profiles of matching people.
             Each query should use different combinations of terms to maximize results.
@@ -54,10 +68,11 @@ class LeadGenerator:
             # Ensure we have at least one query
             if not queries:
                 return [f'site:linkedin.com/in/ {icp}']
+            logger.info(f"Generated {len(queries)} search queries")
             return queries[:3]  # Limit to 3 queries
             
         except Exception as e:
-            print(f"Error in Groq AI processing: {str(e)}")
+            logger.error(f"Error in Groq AI processing: {str(e)}")
             # Fallback to basic query if AI processing fails
             return [f'site:linkedin.com/in/ {icp}']
 
@@ -106,7 +121,7 @@ class LeadGenerator:
             return url
             
         except Exception as e:
-            print(f"Error extracting LinkedIn URL: {str(e)}")
+            logger.error(f"Error extracting LinkedIn URL: {str(e)}")
             return None
 
     async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int) -> Tuple[List[dict], str]:
@@ -118,9 +133,28 @@ class LeadGenerator:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
+
+        # Configure proxy if available
+        proxy_auth = None
+        if settings.is_proxy_configured:
+            if settings.PROXY_USERNAME and settings.PROXY_PASSWORD:
+                proxy_auth = aiohttp.BasicAuth(
+                    login=settings.PROXY_USERNAME,
+                    password=settings.PROXY_PASSWORD
+                )
+                logger.info("Using authenticated proxy connection")
+            else:
+                logger.info("Using non-authenticated proxy connection")
+
+        # Configure timeout and delays
+        timeout = aiohttp.ClientTimeout(total=30)  # 30 second timeout
+        delay = 1 if settings.is_proxy_configured else 2  # Reduced delay with proxy
+        max_pages = 10  # Reduced from 10 to 5 pages per query
+        max_empty_pages = 2  # Reduced from 3 to 2 consecutive empty pages
         
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             for query_index, search_query in enumerate(search_queries, 1):
+                logger.info(f"Processing query {query_index}/{len(search_queries)}")
                 if len(profiles) >= num_leads:
                     break
                     
@@ -128,20 +162,36 @@ class LeadGenerator:
                 start_index = 0
                 consecutive_empty_pages = 0
                 
-                while len(profiles) < num_leads and consecutive_empty_pages < 3:
+                while len(profiles) < num_leads and consecutive_empty_pages < max_empty_pages:
                     google_url = f"https://www.google.com/search?q={encoded_query}&start={start_index}"
+                    logger.info(f"Searching page {(start_index//10) + 1} for query {query_index}")
                     
                     try:
                         # Add delay between requests to avoid rate limiting
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(delay)
                         
-                        async with session.get(google_url, headers=headers) as response:
+                        # Configure request with proxy if available
+                        request_kwargs = {'headers': headers}
+                        if settings.is_proxy_configured:
+                            request_kwargs['proxy'] = settings.PROXY_URL
+                            if proxy_auth:
+                                request_kwargs['proxy_auth'] = proxy_auth
+                            logger.info(f"Making request through proxy: {settings.PROXY_URL}")
+
+                        async with session.get(google_url, **request_kwargs) as response:
                             if response.status == 200:
+                                if settings.is_proxy_configured:
+                                    logger.info("Successful proxy request to Google")
                                 html = await response.text()
                                 
                                 # Check for Google rate limiting or blocking
                                 if "unusual traffic" in html.lower() or "captcha" in html.lower():
-                                    stop_reason = "Google's security check was triggered. This usually happens when making too many requests."
+                                    if settings.is_proxy_configured:
+                                        logger.error("Google's security check triggered even with proxy")
+                                        stop_reason = "Google's security check was triggered even with proxy. Consider using a different proxy or reducing request frequency."
+                                    else:
+                                        logger.error("Google's security check triggered - no proxy configured")
+                                        stop_reason = "Google's security check was triggered. Consider configuring a proxy service."
                                     break
                                 
                                 soup = BeautifulSoup(html, 'html.parser')
@@ -171,28 +221,36 @@ class LeadGenerator:
                                                     'profile_url': linkedin_url,
                                                     'timestamp': datetime.now().isoformat()
                                                 })
+                                                logger.info(f"Found profile {len(profiles)}/{num_leads}")
                                                 
                                                 if len(profiles) >= num_leads:
                                                     break
                                 
                                 if not found_valid_links:
                                     consecutive_empty_pages += 1
+                                    logger.info(f"No new profiles found on this page ({consecutive_empty_pages}/{max_empty_pages} empty pages)")
                                 else:
                                     consecutive_empty_pages = 0
                                 
                                 # Move to next page
                                 start_index += 10
                             else:
+                                logger.error(f"HTTP {response.status} error from Google")
                                 stop_reason = f"Received HTTP {response.status} error from Google. Search stopped."
                                 break
                                 
+                    except asyncio.TimeoutError:
+                        logger.error("Request timed out")
+                        stop_reason = "Request timed out. Consider checking proxy connection or internet stability."
+                        break
                     except Exception as e:
+                        logger.error(f"Error during search: {str(e)}")
                         stop_reason = f"Error during search: {str(e)}"
                         break
                         
                     # Break if we've gone through too many pages
-                    if start_index > 100:  # Limit to 10 pages
-                        stop_reason = "Reached maximum page limit for the current search query."
+                    if start_index >= max_pages * 10:
+                        stop_reason = f"Reached maximum page limit ({max_pages} pages) for the current search query."
                         break
                 
                 # If we hit a rate limit, stop trying more queries
@@ -213,6 +271,7 @@ class LeadGenerator:
     async def generate_leads(self, icp: str, num_leads: int) -> Tuple[str, str]:
         """Main method to generate leads. Returns tuple of (filepath, message)"""
         try:
+            logger.info(f"Starting lead generation for ICP: {icp[:50]}...")
             # Convert ICP to multiple search queries
             search_queries = await self.process_icp_to_search_query(icp)
             
@@ -234,11 +293,12 @@ class LeadGenerator:
                     writer.writeheader()
                     writer.writerows(profiles)
                 
+                logger.info(f"Lead generation completed. Found {len(profiles)} profiles.")
                 return filepath, stop_reason
             else:
                 raise ValueError(stop_reason)
             
         except Exception as e:
             error_message = str(e)
-            print(f"Error in lead generation: {error_message}")
+            logger.error(f"Error in lead generation: {error_message}")
             raise ValueError(error_message)

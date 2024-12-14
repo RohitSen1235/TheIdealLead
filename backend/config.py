@@ -22,6 +22,11 @@ class Settings:
     # Server Settings
     CORS_ORIGINS: List[str] = os.getenv("CORS_ORIGINS", "http://localhost:8080").split(",")
 
+    # Proxy Settings
+    PROXY_URL: str = os.getenv("PROXY_URL", "")
+    PROXY_USERNAME: str = os.getenv("PROXY_USERNAME", "")
+    PROXY_PASSWORD: str = os.getenv("PROXY_PASSWORD", "")
+
     # Validation
     @property
     def is_email_configured(self) -> bool:
@@ -36,6 +41,10 @@ class Settings:
     @property
     def is_ai_configured(self) -> bool:
         return bool(self.GROQ_API_KEY)
+
+    @property
+    def is_proxy_configured(self) -> bool:
+        return bool(self.PROXY_URL)
 
 # Create a global settings instance
 settings = Settings()

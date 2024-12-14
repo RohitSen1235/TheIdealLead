@@ -45,8 +45,8 @@
             type="number"
             id="numberOfLeads"
             min="1"
-            max="100"
-            placeholder="Enter number (1-100)"
+            max="200"
+            placeholder="Enter number (1-200)"
             required
           />
         </div>
