@@ -141,7 +141,7 @@ class LeadGenerator:
                     }
                 ],
                 model="mixtral-8x7b-32768",
-                temperature=0.3,
+                temperature=0.1,
             )
             
             queries = chat_completion.choices[0].message.content.strip().split('\n')

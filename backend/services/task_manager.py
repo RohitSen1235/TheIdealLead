@@ -39,6 +39,7 @@ class TaskManager:
                     "icp": icp,
                     "total_leads_needed": num_leads,
                     "leads_to_find": profiles_for_this_task,
+                    "leads_found": 0,
                     "start_index": start_index,
                     "status": TaskStatus.PENDING,
                     "created_at": datetime.now().isoformat(),
@@ -52,9 +53,12 @@ class TaskManager:
         
         return group_id
 
-    def update_task_status(self, task_id: str, status: str, result_file: Optional[str] = None, warning: Optional[str] = None, error: Optional[str] = None):
+    def update_task_status(self, task_id: str, status: str, result_file: Optional[str] = None, warning: Optional[str] = None, error: Optional[str] = None, leads_found: Optional[int] = None):
         """Update the status of a task"""
         if task_id in self.tasks:
+            if leads_found is not None:
+                self.tasks[task_id]["leads_found"] = leads_found
+                
             self.tasks[task_id].update({
                 "status": status,
                 "completed_at": datetime.now().isoformat() if status in [TaskStatus.COMPLETED, TaskStatus.FAILED] else None,
@@ -74,15 +78,20 @@ class TaskManager:
             
         task_ids = self.task_groups[group_id]
         total_leads_found = 0
+        total_leads_needed = 0
         all_result_files = []
         all_warnings = []
+        all_errors = []
         combined_status = TaskStatus.COMPLETED
+        task_statuses = {}
         
         for task_id in task_ids:
             task = self.tasks[task_id]
+            total_leads_found += task["leads_found"]
+            total_leads_needed += task["leads_to_find"]
+            
             if task["status"] == TaskStatus.FAILED:
                 combined_status = TaskStatus.FAILED
-                break
             elif task["status"] in [TaskStatus.PENDING, TaskStatus.PROCESSING]:
                 combined_status = TaskStatus.PROCESSING
             
@@ -90,13 +99,30 @@ class TaskManager:
                 all_result_files.append(task["result_file"])
             if task["warning"]:
                 all_warnings.append(task["warning"])
+            if task["error"]:
+                all_errors.append(task["error"])
+                
+            task_statuses[task_id] = task["status"]
+        
+        # Only include warnings and errors if all tasks are complete
+        final_warnings = all_warnings if combined_status in [TaskStatus.COMPLETED, TaskStatus.FAILED] else []
+        final_errors = all_errors if combined_status in [TaskStatus.COMPLETED, TaskStatus.FAILED] else []
+        
+        # Create progress message
+        progress_message = f"Found {total_leads_found} profiles out of {total_leads_needed} requested."
+        if total_leads_found < total_leads_needed and combined_status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
+            progress_message += " Exhausted all available search results."
         
         return {
             "group_id": group_id,
             "status": combined_status,
+            "total_leads_found": total_leads_found,
+            "total_leads_needed": total_leads_needed,
+            "progress_message": progress_message,
             "result_files": all_result_files,
-            "warnings": all_warnings,
-            "task_statuses": {task_id: self.tasks[task_id]["status"] for task_id in task_ids}
+            "warnings": final_warnings,
+            "errors": final_errors,
+            "task_statuses": task_statuses
         }
 
     async def process_task(self, task_id: str, lead_generator):
@@ -113,11 +139,20 @@ class TaskManager:
                     task["start_index"]
                 )
                 
+                # Extract number of leads found from warning message
+                leads_found = 0
+                if warning_message:
+                    import re
+                    match = re.search(r"Found (\d+) profiles", warning_message)
+                    if match:
+                        leads_found = int(match.group(1))
+                
                 self.update_task_status(
                     task_id, 
                     TaskStatus.COMPLETED, 
                     result_file=result_file,
-                    warning=warning_message
+                    warning=warning_message,
+                    leads_found=leads_found
                 )
                 
             except Exception as e:

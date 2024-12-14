@@ -65,6 +65,11 @@
             {{ getStatusMessage }}
           </div>
 
+          <!-- Progress Display -->
+          <div v-if="progressMessage" class="progress-message">
+            {{ progressMessage }}
+          </div>
+
           <!-- Task Status Display -->
           <div v-if="taskStatuses" class="task-statuses">
             <div
@@ -82,7 +87,7 @@
           </div>
 
           <!-- Warning Display -->
-          <div v-if="warnings && warnings.length" class="warning-section">
+          <div v-if="showWarnings && warnings.length" class="warning-section">
             <p
               v-for="(warning, index) in warnings"
               :key="index"
@@ -92,18 +97,24 @@
             </p>
           </div>
 
+          <!-- Error Display -->
+          <div v-if="showErrors && errors.length" class="error-section">
+            <p
+              v-for="(error, index) in errors"
+              :key="index"
+              class="error-message"
+            >
+              {{ error }}
+            </p>
+            <button @click="resetTask" class="retry-button">Try Again</button>
+          </div>
+
           <!-- Download Section -->
           <div v-if="groupStatus === 'completed'" class="download-section">
             <p>Your leads are ready!</p>
             <button @click="downloadResults" class="download-button">
               Download Leads (CSV)
             </button>
-          </div>
-
-          <!-- Error Display -->
-          <div v-if="groupStatus === 'failed'" class="error-section">
-            <p class="error-message">{{ errorMessage }}</p>
-            <button @click="resetTask" class="retry-button">Try Again</button>
           </div>
         </div>
       </div>
@@ -123,9 +134,12 @@ export default {
       currentGroupId: null,
       groupStatus: "pending",
       taskStatuses: null,
-      errorMessage: "",
+      progressMessage: "",
+      errors: [],
       warnings: [],
       statusCheckInterval: null,
+      totalLeadsFound: 0,
+      totalLeadsNeeded: 0,
     };
   },
 
@@ -143,13 +157,22 @@ export default {
       };
       return messages[this.groupStatus] || "Unknown status";
     },
+
+    showWarnings() {
+      return !this.isProcessing;
+    },
+
+    showErrors() {
+      return !this.isProcessing && this.groupStatus === "failed";
+    },
   },
 
   methods: {
     async startLeadGeneration() {
       this.isSubmitting = true;
-      this.errorMessage = "";
+      this.errors = [];
       this.warnings = [];
+      this.progressMessage = "";
 
       try {
         const response = await api.startLeadGeneration({
@@ -160,7 +183,7 @@ export default {
         this.currentGroupId = response.group_id;
         this.startStatusChecking();
       } catch (error) {
-        this.errorMessage = error.message;
+        this.errors = [error.message];
       } finally {
         this.isSubmitting = false;
       }
@@ -174,10 +197,10 @@ export default {
         this.groupStatus = status.status;
         this.taskStatuses = status.task_statuses;
         this.warnings = status.warnings || [];
-
-        if (status.error) {
-          this.errorMessage = status.error;
-        }
+        this.errors = status.errors || [];
+        this.progressMessage = status.progress_message || "";
+        this.totalLeadsFound = status.total_leads_found;
+        this.totalLeadsNeeded = status.total_leads_needed;
 
         // Stop checking if group is completed or failed
         if (["completed", "failed"].includes(status.status)) {
@@ -185,7 +208,7 @@ export default {
         }
       } catch (error) {
         console.error("Error checking task status:", error);
-        this.errorMessage = error.message;
+        this.errors = [error.message];
         this.stopStatusChecking();
       }
     },
@@ -213,7 +236,7 @@ export default {
       try {
         await api.downloadResults(this.currentGroupId);
       } catch (error) {
-        this.errorMessage = error.message;
+        this.errors = [error.message];
       }
     },
 
@@ -221,8 +244,11 @@ export default {
       this.currentGroupId = null;
       this.groupStatus = "pending";
       this.taskStatuses = null;
-      this.errorMessage = "";
+      this.errors = [];
       this.warnings = [];
+      this.progressMessage = "";
+      this.totalLeadsFound = 0;
+      this.totalLeadsNeeded = 0;
       this.stopStatusChecking();
     },
   },
@@ -357,6 +383,14 @@ input:focus {
   font-size: 1.1rem;
   font-weight: 500;
   margin-bottom: 1rem;
+}
+
+.progress-message {
+  margin: 1rem 0;
+  padding: 0.75rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  font-weight: 500;
 }
 
 .task-statuses {
