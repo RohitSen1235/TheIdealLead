@@ -45,9 +45,9 @@
             v-model.number="numberOfLeads"
             type="number"
             id="numberOfLeads"
-            min="1"
-            max="200"
-            placeholder="Enter number (1-200)"
+            min="10"
+            max="1000"
+            placeholder="Enter number (1-1000)"
             required
           />
         </div>

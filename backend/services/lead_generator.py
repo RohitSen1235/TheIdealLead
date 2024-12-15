@@ -1,5 +1,5 @@
 import asyncio
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple, Dict, Optional, Set
 import aiohttp
 from bs4 import BeautifulSoup
 import os
@@ -33,7 +33,7 @@ class ProxyManager:
         self.last_used = defaultdict(lambda: datetime.min)
         
         # Configuration
-        self.max_errors = 3  # Max errors before cooldown
+        self.max_errors = 2  # Max errors before cooldown
         self.cooldown_minutes = 5  # Cooldown period in minutes
         self.min_delay = 1  # Minimum seconds between requests per proxy
         
@@ -126,7 +126,7 @@ class LeadGenerator:
         try:
             logger.info("Generating search queries from ICP...")
             prompt = f"""
-            Convert this Ideal Customer Profile description into 3 different Google search queries that will find LinkedIn profiles of matching people.
+            Convert this Ideal Customer Profile description into 5 different Google search queries that will find LinkedIn profiles of matching people.
             Each query should use different combinations of terms to maximize results.
             Use LinkedIn's site search and relevant operators.
             
@@ -135,7 +135,7 @@ class LeadGenerator:
             Format each query like this example:
             site:linkedin.com/in/ (Job Title OR Alternative Title) AND (Industry OR Sector) AND (Location OR Region)
             
-            Return exactly 3 different search queries, one per line, nothing else.
+            Return exactly 5 different search queries, one per line, nothing else.
             Make each query unique by using different synonyms or combinations.
             """
             
@@ -147,7 +147,7 @@ class LeadGenerator:
                     }
                 ],
                 model="mixtral-8x7b-32768",
-                temperature=0.3,
+                temperature=0.2,
             )
             
             queries = chat_completion.choices[0].message.content.strip().split('\n')
@@ -155,7 +155,7 @@ class LeadGenerator:
             if not queries:
                 return [f'site:linkedin.com/in/ {icp}']
             logger.info(f"Generated {len(queries)} search queries")
-            return queries[:3]  # Limit to 3 queries
+            return queries[:5]  # Limit to 5 queries
             
         except Exception as e:
             logger.error(f"Error in Groq AI processing: {str(e)}")
@@ -261,10 +261,10 @@ class LeadGenerator:
         
         return "", False
 
-    async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int, start_index: int = 0) -> SearchResult:
+    async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int, start_index: int = 0, seen_urls: Optional[Set[str]] = None) -> SearchResult:
         """Scrape LinkedIn profile URLs from Google search results"""
         profiles = []
-        seen_urls = set()  # Track seen URLs to avoid duplicates
+        seen_urls = seen_urls if seen_urls is not None else set()  # Use provided set or create new one
         warnings = set()  # Use set to avoid duplicate warnings
         
         headers = {
@@ -273,7 +273,7 @@ class LeadGenerator:
 
         # Configure timeout
         timeout = aiohttp.ClientTimeout(total=30)  # 30 second timeout
-        max_pages = 10
+        max_pages = 20
         max_empty_pages = 2
         
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -350,15 +350,22 @@ class LeadGenerator:
         
         return SearchResult(profiles, len(profiles), list(warnings))
 
-    async def generate_leads(self, icp: str, num_leads: int, start_index: int = 0) -> Tuple[str, str]:
+    async def generate_leads(self, icp: str, num_leads: int, start_index: int = 0, seen_urls: Optional[Set[str]] = None, search_queries: Optional[List[str]] = None) -> Tuple[str, str]:
         """Main method to generate leads. Returns tuple of (filepath, message)"""
         try:
             logger.info(f"Starting lead generation for ICP: {icp[:50]}... (profiles {start_index+1} to {start_index+num_leads})")
-            # Convert ICP to multiple search queries
-            search_queries = await self.process_icp_to_search_query(icp)
             
-            # Scrape profiles using multiple queries
-            search_result = await self.scrape_linkedin_profiles(search_queries, num_leads, start_index)
+            # Use provided search queries or generate new ones
+            if not search_queries:
+                search_queries = await self.process_icp_to_search_query(icp)
+            
+            # Log which queries this task will use
+            logger.info(f"Using {len(search_queries)} search queries for this task")
+            for i, query in enumerate(search_queries, 1):
+                logger.info(f"Query {i}: {query}")
+            
+            # Scrape profiles using the queries
+            search_result = await self.scrape_linkedin_profiles(search_queries, num_leads, start_index, seen_urls)
             
             # Always save whatever profiles we found
             if search_result.profiles:

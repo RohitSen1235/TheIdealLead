@@ -14,14 +14,39 @@ class TaskStatus:
 class TaskManager:
     def __init__(self):
         self.tasks: Dict[str, Dict] = {}
-        self.max_concurrent_tasks = 3
+        self.max_concurrent_tasks = 5
         self._semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
         self.task_groups: Dict[str, List[str]] = {}  # Group ID -> List of task IDs
+        self.group_seen_urls: Dict[str, set] = {}  # Group ID -> Set of seen URLs
+        self.group_queries: Dict[str, List[str]] = {}  # Group ID -> List of search queries
+
+    async def _generate_search_queries(self, lead_generator, icp: str) -> List[str]:
+        """Generate all search queries for a group"""
+        # Request more queries since we'll distribute them
+        num_tasks = self.max_concurrent_tasks
+        queries_per_task = 3  # Each task gets 3 unique queries
+        total_queries_needed = num_tasks * queries_per_task
+        
+        all_queries = []
+        # Generate queries in batches of 5 until we have enough
+        while len(all_queries) < total_queries_needed:
+            new_queries = await lead_generator.process_icp_to_search_query(icp)
+            # Add only unique queries
+            for query in new_queries:
+                if query not in all_queries:
+                    all_queries.append(query)
+            # Avoid infinite loop if we can't get enough unique queries
+            if len(all_queries) < total_queries_needed and len(all_queries) >= len(new_queries):
+                break
+                
+        return all_queries
 
     def create_distributed_tasks(self, icp: str, num_leads: int) -> str:
         """Create multiple tasks that distribute the workload and return group ID"""
         group_id = str(uuid.uuid4())
         self.task_groups[group_id] = []
+        self.group_seen_urls[group_id] = set()  # Initialize empty set for this group
+        self.group_queries[group_id] = []  # Initialize empty list for search queries
         
         # Calculate profiles per task
         base_profiles_per_task = math.floor(num_leads / self.max_concurrent_tasks)
@@ -42,6 +67,7 @@ class TaskManager:
                     "leads_to_find": profiles_for_this_task,
                     "leads_found": 0,
                     "start_index": start_index,
+                    "query_index": i,  # Store task's index for query distribution
                     "status": TaskStatus.PENDING,
                     "created_at": datetime.now().isoformat(),
                     "completed_at": None,
@@ -150,13 +176,26 @@ class TaskManager:
         async with self._semaphore:
             try:
                 task = self.tasks[task_id]
+                group_id = task["group_id"]
                 self.update_task_status(task_id, TaskStatus.PROCESSING)
                 
-                # Generate leads with specific range for this task
+                # Generate queries for the group if not already done
+                if not self.group_queries.get(group_id):
+                    self.group_queries[group_id] = await self._generate_search_queries(lead_generator, task["icp"])
+                
+                # Get this task's portion of queries
+                queries_per_task = len(self.group_queries[group_id]) // len(self.task_groups[group_id])
+                start_idx = task["query_index"] * queries_per_task
+                end_idx = start_idx + queries_per_task
+                task_queries = self.group_queries[group_id][start_idx:end_idx]
+                
+                # Pass task-specific queries and shared seen_urls set to lead generator
                 result_file, message = await lead_generator.generate_leads(
                     task["icp"],
                     task["leads_to_find"],
-                    task["start_index"]
+                    task["start_index"],
+                    self.group_seen_urls[group_id],
+                    task_queries  # Pass task-specific queries
                 )
                 
                 # Extract number of leads found from warning message
@@ -202,6 +241,10 @@ class TaskManager:
         for group_id in groups_to_remove:
             if group_id in self.task_groups:
                 del self.task_groups[group_id]
+                if group_id in self.group_seen_urls:
+                    del self.group_seen_urls[group_id]
+                if group_id in self.group_queries:
+                    del self.group_queries[group_id]
 
 # Create a global task manager instance
 task_manager = TaskManager()
