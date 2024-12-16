@@ -12,15 +12,7 @@
 
     <section class="pricing">
       <div class="container">
-        <h2>Choose Your Plan</h2>
-        <div class="billing-toggle">
-          <span :class="{ active: !isAnnual }">Monthly</span>
-          <label class="switch">
-            <input type="checkbox" v-model="isAnnual" />
-            <span class="slider"></span>
-          </label>
-          <span :class="{ active: isAnnual }">Annual</span>
-        </div>
+        <h2>Choose Your Credit Package</h2>
         <div class="pricing-plans">
           <div
             class="plan"
@@ -30,12 +22,8 @@
           >
             <div class="plan-content">
               <h3>{{ plan.name }}</h3>
-              <p class="price">
-                {{ isAnnual ? plan.annualPrice : plan.monthlyPrice }}
-              </p>
-              <p class="billing-period">
-                {{ isAnnual ? "per year" : "per month" }}
-              </p>
+              <p class="price">${{ plan.price }}</p>
+              <p class="credits">{{ plan.credits }} Credits</p>
               <ul>
                 <li
                   v-for="(feature, featureIndex) in plan.features"
@@ -45,7 +33,9 @@
                 </li>
               </ul>
             </div>
-            <button class="plan-cta">Select Plan</button>
+            <button @click="purchaseCredits(plan)" class="plan-cta">
+              Get Credits
+            </button>
           </div>
         </div>
       </div>
@@ -54,42 +44,47 @@
 </template>
 
 <script>
+import api from "@/services/api";
+
 export default {
   name: "PricingView",
   data() {
     return {
-      title: "Simple, Transparent Pricing",
-      subtitle: "Choose the plan that fits your business needs",
-      isAnnual: false,
+      title: "Get More Credits",
+      subtitle: "Choose the credit package that fits your needs",
       plans: [
         {
           name: "Starter",
-          monthlyPrice: "$49/mo",
-          annualPrice: "$530/yr",
-          features: ["Up to 1,000 leads", "Basic analytics", "Email support"],
+          price: 49,
+          credits: 500,
+          features: [
+            "Generate up to 500 leads",
+            "Basic support",
+            "Credits never expire",
+          ],
         },
         {
           name: "Pro",
-          monthlyPrice: "$99/mo",
-          annualPrice: "$1,010/yr",
+          price: 99,
+          credits: 1100,
           features: [
-            "Up to 10,000 leads",
-            "Advanced analytics",
+            "Generate up to 1,100 leads",
             "Priority support",
-            "API access",
+            "Credits never expire",
+            "10% bonus credits",
           ],
           featured: true,
         },
         {
           name: "Enterprise",
-          monthlyPrice: "$199/mo",
-          annualPrice: "$1,910/yr",
+          price: 199,
+          credits: 2500,
           features: [
-            "Unlimited leads",
-            "Custom analytics",
+            "Generate up to 2,500 leads",
             "24/7 dedicated support",
-            "Full API access",
-            "Custom integrations",
+            "Credits never expire",
+            "25% bonus credits",
+            "Custom lead criteria",
           ],
         },
       ],
@@ -99,6 +94,28 @@ export default {
     ctaAction() {
       const element = document.querySelector(".pricing");
       element.scrollIntoView({ behavior: "smooth" });
+    },
+    async purchaseCredits(plan) {
+      if (!this.$store.state.user) {
+        // Redirect to login if not authenticated
+        this.$router.push("/auth");
+        return;
+      }
+
+      try {
+        await api.purchaseCredits(plan.credits);
+        // Refresh user data to get updated credits
+        await this.$store.dispatch("updateUserProfile");
+        this.$notify({
+          type: "success",
+          text: `Successfully added ${plan.credits} credits!`,
+        });
+      } catch (error) {
+        this.$notify({
+          type: "error",
+          text: error.message || "Failed to add credits",
+        });
+      }
     },
   },
 };
@@ -162,96 +179,6 @@ export default {
   color: #4a90e2;
 }
 
-.billing-toggle {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-bottom: 2rem;
-}
-
-.billing-toggle span {
-  margin: 0 3rem;
-  color: #666;
-  font-size: 2rem;
-  transition: color 0.3s ease;
-}
-
-.billing-toggle span.active {
-  color: #4a90e2;
-  font-weight: bold;
-}
-
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 160px;
-  height: 34px;
-}
-
-.switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.slider {
-  position: absolute;
-  cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #ccc;
-  transition: 0.4s;
-  border-radius: 34px;
-}
-
-.slider:before {
-  position: absolute;
-  content: "";
-  height: 26px;
-  width: 26px;
-  left: 4px;
-  bottom: 4px;
-  background-color: white;
-  transition: 0.4s;
-  border-radius: 50%;
-}
-
-input:checked + .slider {
-  background-color: #4a90e2;
-}
-
-input:checked + .slider:before {
-  transform: translateX(26px);
-}
-
-@media (max-width: 768px) {
-  .billing-toggle {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .billing-toggle span {
-    margin: 0.5rem;
-    font-size: 0.9rem;
-  }
-
-  .switch {
-    width: 50px;
-    height: 28px;
-  }
-
-  .slider:before {
-    height: 20px;
-    width: 20px;
-  }
-
-  input:checked + .slider:before {
-    transform: translateX(22px);
-  }
-}
-
 .pricing-plans {
   display: flex;
   justify-content: center;
@@ -299,8 +226,8 @@ input:checked + .slider:before {
   margin-bottom: 0.5rem;
 }
 
-.billing-period {
-  font-size: 0.9rem;
+.plan .credits {
+  font-size: 1.2rem;
   color: #666;
   margin-bottom: 1.5rem;
 }
@@ -346,21 +273,6 @@ input:checked + .slider:before {
 
   .plan.featured {
     transform: none;
-  }
-
-  .billing-toggle {
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .billing-toggle span {
-    margin: 0.5rem;
-    font-size: 0.8rem;
-  }
-
-  .switch {
-    margin: 0.5rem;
   }
 }
 </style>

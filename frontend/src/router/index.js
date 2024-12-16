@@ -1,8 +1,6 @@
 import { createRouter, createWebHistory } from "vue-router";
 import HomeView from "../views/HomeView.vue";
-import FeaturesView from "../views/FeaturesView.vue";
-import DemoView from "../views/DemoView.vue"; // Import the Demo view
-// import PricingView from "../views/PricingView.vue";
+import AuthView from "../views/AuthView.vue";
 
 const routes = [
   {
@@ -11,25 +9,60 @@ const routes = [
     component: HomeView,
   },
   {
-    path: "/features",
-    name: "features",
-    component: FeaturesView,
+    path: "/auth",
+    name: "auth",
+    component: AuthView,
+    meta: { requiresGuest: true },
   },
   {
-    path: "/demo", // Add the route for the Demo page
-    name: "demo",
-    component: DemoView,
+    path: "/about",
+    name: "about",
+    component: () => import("../views/AboutView.vue"),
   },
-  // {
-  //   path: "/pricing",
-  //   name: "pricing",
-  //   component: PricingView,
-  // },
+  {
+    path: "/features",
+    name: "features",
+    component: () => import("../views/FeaturesView.vue"),
+  },
+  {
+    path: "/pricing",
+    name: "pricing",
+    component: () => import("../views/PricingView.vue"),
+  },
+  {
+    path: "/demo",
+    name: "demo",
+    component: () => import("../views/DemoView.vue"),
+    meta: { requiresAuth: true },
+  },
 ];
 
 const router = createRouter({
   history: createWebHistory(process.env.BASE_URL),
   routes,
+});
+
+// Navigation guard
+router.beforeEach((to, from, next) => {
+  const hasToken = !!localStorage.getItem("access_token");
+
+  // Routes that require authentication
+  if (to.matched.some((record) => record.meta.requiresAuth)) {
+    if (!hasToken) {
+      next({ name: "auth" });
+      return;
+    }
+  }
+
+  // Routes that require guest (non-authenticated) access
+  if (to.matched.some((record) => record.meta.requiresGuest)) {
+    if (hasToken) {
+      next({ name: "demo" });
+      return;
+    }
+  }
+
+  next();
 });
 
 export default router;

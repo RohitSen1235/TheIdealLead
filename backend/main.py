@@ -1,25 +1,31 @@
-from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks
+from datetime import timedelta
+from fastapi import FastAPI, HTTPException, Depends, Request, BackgroundTasks, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
-from sqlalchemy import create_engine, Column, Integer, String
-from sqlalchemy.ext.declarative import declarative_base
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-from pydantic import BaseModel, EmailStr
-from sqlalchemy.exc import IntegrityError   
-from typing import Optional
+from pydantic import EmailStr
 import pandas as pd
 import tempfile
 import os
-
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import smtplib
 
 # Import internal modules
 from config import settings
-from models import LeadGenerationRequest, LeadCreate
+from models import (
+    LeadGenerationRequest, LeadCreate, User, UserCreate, Token,
+    Base, DBLead, DBUser, CreditPurchaseRequest, CreditPurchaseResponse
+)
 from services.lead_generator import LeadGenerator
 from services.task_manager import task_manager, TaskStatus
+from services.auth import (
+    create_user, authenticate_user, create_access_token,
+    get_current_user_from_token, check_user_credits, deduct_user_credits
+)
+from services.payment import create_payment_intent
 
 app = FastAPI()
 
@@ -35,20 +41,15 @@ app.add_middleware(
 # Database setup
 engine = create_engine(settings.DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
 
-class Lead(Base):
-    __tablename__ = "leads"
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    email = Column(String, unique=True, index=True)
-    company = Column(String)
-    phone = Column(String)
-
+# Create all tables
 Base.metadata.create_all(bind=engine)
 
 # Initialize LeadGenerator
 lead_generator = LeadGenerator()
+
+# OAuth2 scheme
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # Dependency to get the database session
 def get_db():
@@ -58,7 +59,14 @@ def get_db():
     finally:
         db.close()
 
-async def send_email(to_email: str, name: str, task_id: Optional[str] = None, result_file: Optional[str] = None):
+# Dependency to get current user
+async def get_current_user(
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme)
+) -> DBUser:
+    return get_current_user_from_token(token, db)
+
+async def send_welcome_email(to_email: str, name: str):
     if not settings.is_email_configured:
         print("Email settings not configured, skipping email send")
         return
@@ -66,31 +74,18 @@ async def send_email(to_email: str, name: str, task_id: Optional[str] = None, re
     message = MIMEMultipart("alternative")
     message["From"] = settings.EMAIL_FROM
     message["To"] = to_email
+    message["Subject"] = "Welcome to TargetSphere!"
+
+    text = f"""
+    Dear {name},
+
+    Welcome to TargetSphere! We're excited to have you on board.
     
-    if task_id and result_file:
-        message["Subject"] = "Your Lead Generation Results Are Ready!"
-        text = f"""
-        Dear {name},
-
-        Your lead generation task has been completed! You can check the results in your dashboard.
-
-        Task ID: {task_id}
-
-        Best regards,
-        The LeadGen Pro Team
-        """
-    else:
-        message["Subject"] = "Welcome to LeadGen Pro's Early Access Program!"
-        text = f"""
-        Dear {name},
-
-        Thank you for your interest in LeadGen Pro! We're excited to have you on board.
-
-        You are now eligible for our exclusive early access program, offering you the opportunity to test our product and provide valuable feedback.
-
-        Best regards,
-        The LeadGen Pro Team
-        """
+    You've received 100 credits to start generating leads right away.
+    
+    Best regards,
+    The TargetSphere Team
+    """
 
     part1 = MIMEText(text, "plain")
     message.attach(part1)
@@ -100,10 +95,9 @@ async def send_email(to_email: str, name: str, task_id: Optional[str] = None, re
             server.starttls()
             server.login(settings.EMAIL_USERNAME, settings.EMAIL_PASSWORD)
             server.send_message(message)
-        print(f"Email sent successfully to {to_email}")
+        print(f"Welcome email sent successfully to {to_email}")
     except Exception as e:
-        print(f"Failed to send email: {str(e)}")
-        # Don't raise the exception as email sending is not critical
+        print(f"Failed to send welcome email: {str(e)}")
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -112,57 +106,91 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         content={"message": f"Error: {exc.detail}"},
     )
 
-@app.post("/submit-lead/")
-async def submit_lead(lead: LeadCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    print(f"Received lead data: {lead.dict()}")
+@app.post("/register", response_model=Token)
+async def register_user(user: UserCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    # Check if user already exists
+    db_user = db.query(DBUser).filter(DBUser.email == user.email).first()
+    if db_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
+    user = create_user(db, user)
+    
+    # Send welcome email
+    background_tasks.add_task(send_welcome_email, user.email, user.name)
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    
+    return {"access_token": access_token, "token_type": "bearer"}
 
-    db_lead = Lead(**lead.dict())
-    db.add(db_lead)
-    try:
-        db.commit()
-        db.refresh(db_lead)
-        is_new_lead = True
-    except IntegrityError as e:
-        db.rollback()
-        print(f"Lead already exists: {str(e)}")
-        is_new_lead = False
-    except Exception as e:
-        db.rollback()
-        print(f"Database error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error processing lead: {str(e)}")
+@app.post("/token", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = authenticate_user(db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
-    background_tasks.add_task(send_email, lead.email, lead.name)
-    print(f"Email task added for {lead.email}")
-
-    if is_new_lead:
-        message = "Lead submitted successfully and email will be sent."
-    else:
-        message = "Lead already exists, but email will be sent."
-
-    return {"message": message}
-
-@app.get("/")
-async def read_root():
-    return {"message": "Welcome to the Lead Generation API"}
-
-class CreditCalculationRequest(BaseModel):
-    icp: str
-    num_leads: int
+@app.get("/users/me", response_model=User)
+async def read_users_me(current_user: DBUser = Depends(get_current_user)):
+    return current_user
 
 @app.post("/calculate-credits/")
-async def calculate_credits(request: CreditCalculationRequest):
+async def calculate_credits(
+    request: LeadGenerationRequest,
+    current_user: DBUser = Depends(get_current_user)
+):
     """Calculate credits required for lead generation"""
-    if request.num_leads <= 0:
+    if request.number_of_leads <= 0:
         raise HTTPException(status_code=400, detail="Number of leads must be greater than 0")
     try:
-        credits_info = await lead_generator.calculate_credits(request.icp, request.num_leads)
+        credits_info = await lead_generator.calculate_credits(
+            request.ideal_customer_profile,
+            request.number_of_leads
+        )
         return credits_info
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/start-lead-generation/")
-async def start_lead_generation(request: LeadGenerationRequest, background_tasks: BackgroundTasks):
+async def start_lead_generation(
+    request: LeadGenerationRequest,
+    background_tasks: BackgroundTasks,
+    current_user: DBUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     try:
+        # Calculate required credits
+        credits_info = await lead_generator.calculate_credits(
+            request.ideal_customer_profile,
+            request.number_of_leads
+        )
+        
+        # Check if user has enough credits
+        required_credits = credits_info["total_credits"]
+        if not check_user_credits(current_user, required_credits):
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Insufficient credits. Required: {required_credits}, Available: {current_user.credits}"
+            )
+        
+        # Deduct credits
+        deduct_user_credits(db, current_user, required_credits)
+        
         # Create distributed tasks
         group_id = task_manager.create_distributed_tasks(
             icp=request.ideal_customer_profile,
@@ -188,7 +216,10 @@ async def start_lead_generation(request: LeadGenerationRequest, background_tasks
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/task-status/{task_id}")
-async def get_task_status(task_id: str):
+async def get_task_status(
+    task_id: str,
+    current_user: DBUser = Depends(get_current_user)
+):
     # First try to get individual task status
     status = task_manager.get_task_status(task_id)
     if status:
@@ -202,7 +233,10 @@ async def get_task_status(task_id: str):
     raise HTTPException(status_code=404, detail="Task or group not found")
 
 @app.get("/download-results/{group_id}")
-async def download_results(group_id: str):
+async def download_results(
+    group_id: str,
+    current_user: DBUser = Depends(get_current_user)
+):
     # Get group status
     group_status = task_manager.get_group_status(group_id)
     if not group_status:
@@ -245,6 +279,21 @@ async def download_results(group_id: str):
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error combining results: {str(e)}")
+
+@app.post("/purchase-credits/", response_model=CreditPurchaseResponse)
+async def purchase_credits(
+    request: CreditPurchaseRequest,
+    current_user: DBUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Purchase credits (development mode - automatically adds credits)"""
+    if request.credits <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Number of credits must be greater than 0"
+        )
+    
+    return create_payment_intent(db, current_user, request.credits)
 
 if __name__ == "__main__":
     import uvicorn

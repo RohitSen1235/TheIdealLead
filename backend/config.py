@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 import os
 from typing import List, Dict
 import json
+import secrets
 
 # Load environment variables from .env file
 load_dotenv()
@@ -26,6 +27,17 @@ class Settings:
     # Credit Settings
     BASE_CREDITS_PER_LEAD: int = int(os.getenv("BASE_CREDITS_PER_LEAD", "1"))
     AI_QUERY_CREDITS: int = int(os.getenv("AI_QUERY_CREDITS", "1"))  # Credits for AI processing
+    CREDIT_PRICE_USD: float = float(os.getenv("CREDIT_PRICE_USD", "0.10"))  # Price per credit in USD
+
+    # Payment Settings
+    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
+    STRIPE_PUBLISHABLE_KEY: str = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+    # Auth Settings
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
 
     # Proxy Settings
     # Now supports both single proxy and multiple proxies
@@ -73,6 +85,13 @@ class Settings:
     @property
     def is_proxy_configured(self) -> bool:
         return len(self.PROXY_URLS) > 0
+
+    @property
+    def is_stripe_configured(self) -> bool:
+        return all([
+            self.STRIPE_SECRET_KEY,
+            self.STRIPE_PUBLISHABLE_KEY
+        ])
 
 # Create a global settings instance
 settings = Settings()

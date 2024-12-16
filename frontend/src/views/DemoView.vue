@@ -1,27 +1,70 @@
-<!-- Template section remains the same -->
+<!-- Same template as before but fix the credit packages section -->
 <template>
   <div>
     <!-- Hero Section -->
     <section class="hero">
       <div class="hero-content">
-        <h1>Experience the power of AI-powered lead generation</h1>
+        <h1>AI-Powered Lead Generation</h1>
         <p>
-          Your journey to effective lead generation starts here. Fill out the
-          form below to get started!
+          Generate high-quality leads tailored to your Ideal Customer Profile
         </p>
+        <div class="user-info" v-if="user">
+          <p>Welcome, {{ user.name }}</p>
+          <p class="credits">
+            Available Credits: {{ user.credits }}
+            <button
+              @click="showPurchaseModal = true"
+              class="purchase-credits-btn"
+            >
+              Purchase Credits
+            </button>
+          </p>
+        </div>
       </div>
     </section>
 
+    <!-- Credit Purchase Modal -->
+    <div v-if="showPurchaseModal" class="modal-overlay">
+      <div class="modal">
+        <h2>Purchase Credits</h2>
+        <div class="credit-packages">
+          <div
+            v-for="pkg in creditPackages"
+            :key="pkg.credits"
+            class="credit-package"
+            :class="{ selected: selectedPackage === pkg }"
+            @click="selectedPackage = pkg"
+          >
+            <h3>{{ pkg.credits }} Credits</h3>
+            <p class="price">${{ pkg.price }}</p>
+            <p class="savings" v-if="pkg.savings">Save {{ pkg.savings }}%</p>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button
+            class="purchase-button"
+            :disabled="!selectedPackage || isPurchasing"
+            @click="purchaseCredits"
+          >
+            {{
+              isPurchasing
+                ? "Processing..."
+                : `Purchase ${selectedPackage?.credits || ""} Credits`
+            }}
+          </button>
+          <button class="cancel-button" @click="showPurchaseModal = false">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Lead Generation Form -->
     <div class="demo-container">
-      <h2>Start Your Lead Generation Trial</h2>
+      <h2>Generate Targeted Leads</h2>
       <p>
         Fill out the form below to initiate the lead generation process tailored
         to your Ideal Customer Profile.
-        <br />
-        <span class="note">
-          Note: This is a demo version, so there are restrictions for usage.
-        </span>
       </p>
 
       <!-- Form Section -->
@@ -92,13 +135,24 @@
               <span>Estimated Credits Required:</span>
               <span>{{ creditInfo.total_credits }}</span>
             </div>
+            <div
+              v-if="user && creditInfo.total_credits > user.credits"
+              class="insufficient-credits"
+            >
+              Insufficient credits. You need
+              {{ creditInfo.total_credits - user.credits }} more credits.
+            </div>
           </div>
         </div>
 
         <button
           type="submit"
           class="cta-button"
-          :disabled="isSubmitting || !creditInfo"
+          :disabled="
+            isSubmitting ||
+            !creditInfo ||
+            (user && creditInfo.total_credits > user.credits)
+          "
         >
           {{ isSubmitting ? "Starting Process..." : "Start Lead Generation" }}
         </button>
@@ -203,6 +257,7 @@ import api from "@/services/api";
 export default {
   data() {
     return {
+      user: null,
       icp: "",
       numberOfLeads: null,
       isSubmitting: false,
@@ -217,6 +272,14 @@ export default {
       totalLeadsNeeded: 0,
       taskErrors: {},
       creditInfo: null,
+      showPurchaseModal: false,
+      selectedPackage: null,
+      isPurchasing: false,
+      creditPackages: [
+        { credits: 100, price: 49, savings: null },
+        { credits: 500, price: 199, savings: 20 },
+        { credits: 1000, price: 349, savings: 30 },
+      ],
     };
   },
 
@@ -262,6 +325,14 @@ export default {
     },
   },
 
+  async created() {
+    try {
+      this.user = await api.getUserProfile();
+    } catch (error) {
+      console.error("Failed to load user profile:", error);
+    }
+  },
+
   methods: {
     getComplexityClass(multiple) {
       if (multiple <= 1.5) return "complexity-low";
@@ -296,13 +367,16 @@ export default {
       this.taskErrors = {};
 
       try {
-        const response = await api.startLeadGeneration({
+        const result = await api.startLeadGeneration({
           ideal_customer_profile: this.icp,
           number_of_leads: this.numberOfLeads,
         });
 
-        this.currentGroupId = response.group_id;
+        this.currentGroupId = result.group_id;
         this.startStatusChecking();
+
+        // Update user credits
+        this.user = await api.getUserProfile();
       } catch (error) {
         this.errors = [error.message];
       } finally {
@@ -380,6 +454,25 @@ export default {
       this.taskErrors = {};
       this.stopStatusChecking();
     },
+
+    async purchaseCredits() {
+      if (!this.selectedPackage) return;
+
+      this.isPurchasing = true;
+      try {
+        await api.purchaseCredits(this.selectedPackage.credits);
+        this.user = await api.getUserProfile(); // Refresh user data
+        this.showPurchaseModal = false;
+        alert(
+          `Successfully purchased ${this.selectedPackage.credits} credits!`
+        );
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        this.isPurchasing = false;
+        this.selectedPackage = null;
+      }
+    },
   },
 
   beforeUnmount() {
@@ -390,7 +483,7 @@ export default {
 
 <style scoped>
 .hero {
-  background: linear-gradient(135deg, #4a90e2 0%, #50e3c2 100%);
+  background: linear-gradient(135deg, #4a90e2, #50e3c2);
   color: white;
   padding: 4rem 2rem;
   text-align: center;
@@ -403,66 +496,75 @@ export default {
 
 .hero-content p {
   font-size: 1.2rem;
+  opacity: 0.9;
+}
+
+.user-info {
+  margin-top: 2rem;
+  font-size: 1.1rem;
+}
+
+.credits {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
 }
 
 .demo-container {
-  max-width: 600px;
+  max-width: 800px;
   margin: 2rem auto;
   padding: 2rem;
-  background: white;
-  border-radius: 20px;
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-  color: #333;
 }
 
-.note {
-  color: #4a90e2;
-  font-weight: bold;
-}
-
-h2,
-h3 {
-  text-align: center;
-  margin-bottom: 1rem;
+.demo-container h2 {
   color: #2c3e50;
+  margin-bottom: 1rem;
 }
 
-h2 {
-  font-size: 2rem;
-}
-h3 {
-  font-size: 1.5rem;
+.demo-container > p {
+  color: #666;
+  margin-bottom: 2rem;
 }
 
 .lead-generation-form {
   display: flex;
   flex-direction: column;
+  gap: 1.5rem;
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
 .form-group {
-  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-label {
-  display: block;
-  margin-bottom: 0.5rem;
-  font-weight: bold;
-  color: #34495e;
+.form-group label {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.input-with-button {
+  display: flex;
+  gap: 1rem;
 }
 
 textarea,
 input {
-  width: 100%;
+  flex: 1;
   padding: 0.75rem;
-  border: 2px solid rgba(0, 0, 0, 0.1);
+  border: 2px solid #e0e0e0;
   border-radius: 8px;
   font-size: 1rem;
   transition: all 0.3s ease;
-  background-color: white;
 }
 
 textarea {
-  min-height: 120px;
+  min-height: 100px;
   resize: vertical;
 }
 
@@ -474,21 +576,20 @@ input:focus {
 }
 
 .apply-button {
-  background-color: #2ecc71;
+  padding: 0.75rem 1.5rem;
+  background-color: #50e3c2;
   color: white;
   border: none;
-  padding: 0.75rem 1.5rem;
-  font-size: 1rem;
-  font-weight: 600;
   border-radius: 8px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
-  margin-bottom: 1rem;
-  width: 100%;
+  align-self: flex-start;
 }
 
-.apply-button:hover {
-  background-color: #27ae60;
+.apply-button:hover:not(:disabled) {
+  background-color: #3dd1b0;
+  transform: translateY(-1px);
 }
 
 .apply-button:disabled {
@@ -496,154 +597,9 @@ input:focus {
   cursor: not-allowed;
 }
 
-.cta-button,
-.download-button,
-.retry-button {
-  background-color: #4a90e2;
-  color: white;
-  border: none;
-  padding: 1rem 1.5rem;
-  font-size: 1rem;
-  font-weight: 600;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  width: 100%;
-}
-
-.cta-button:hover,
-.download-button:hover,
-.retry-button:hover {
-  background-color: #357abd;
-  transform: translateY(-2px);
-}
-
-.cta-button:disabled {
-  background-color: #95a5a6;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.task-progress {
-  text-align: center;
-}
-
-.status-container {
-  margin-top: 2rem;
-}
-
-.status-indicator {
-  font-size: 1.2rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  border-radius: 8px;
-  background-color: #f8f9fa;
-}
-
-.progress-display {
-  margin: 1.5rem 0;
-}
-
-.progress-bar {
-  height: 8px;
-  background-color: #eee;
-  border-radius: 4px;
-  overflow: hidden;
-  margin: 0.5rem 0;
-}
-
-.progress-bar-inner {
-  height: 100%;
-  background-color: #4a90e2;
-  transition: width 0.3s ease;
-}
-
-.progress-bar-inner.partial {
-  background-color: #f39c12;
-}
-
-.progress-text {
-  font-size: 1rem;
-  color: #666;
-  margin-top: 0.5rem;
-}
-
-.progress-warning {
-  color: #f39c12;
-  font-weight: 500;
-  margin-left: 0.5rem;
-}
-
-.task-status {
-  display: flex;
-  align-items: center;
-  padding: 0.75rem;
-  border-radius: 6px;
-  background-color: #f8f9fa;
-  font-weight: 500;
-  margin-bottom: 0.5rem;
-}
-
-.task-label {
-  flex: 0 0 auto;
-  margin-right: 1rem;
-}
-
-.task-status-text {
-  flex: 1;
-}
-
-.task-error-icon {
-  flex: 0 0 auto;
-  margin-left: 1rem;
-  cursor: help;
-}
-
-.task-status.completed {
-  background-color: #e8f5e9;
-  color: #2e7d32;
-}
-
-.task-status.processing {
-  background-color: #e3f2fd;
-  color: #1976d2;
-}
-
-.task-status.failed {
-  background-color: #fbe9e7;
-  color: #d32f2f;
-}
-
-.task-status.pending {
-  background-color: #f5f5f5;
-  color: #757575;
-}
-
-.retry-button:hover {
-  background-color: #c0392b;
-}
-
-.error-message {
-  color: #e74c3c;
-  background-color: #fde8e7;
-  padding: 0.75rem;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
-}
-
-.warning-message {
-  color: #f39c12;
-  background-color: #fef5e7;
-  padding: 0.75rem;
-  border-radius: 8px;
-  margin-bottom: 0.5rem;
-}
-
 .credit-info {
-  margin-top: 1rem;
-  padding: 1rem;
   background-color: #f8f9fa;
+  padding: 1.5rem;
   border-radius: 8px;
   border: 1px solid #e9ecef;
 }
@@ -651,66 +607,377 @@ input:focus {
 .credit-breakdown {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e9ecef;
 }
 
+.complexity-info,
 .credit-item {
   display: flex;
   justify-content: space-between;
-  color: #495057;
-}
-
-.credit-item.total {
-  margin-top: 0.5rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #dee2e6;
-  font-weight: bold;
-  color: #2c3e50;
-}
-
-.credit-details {
-  margin-top: 1rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid #dee2e6;
-}
-
-.complexity-info {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.5rem;
 }
 
 .complexity-low {
-  color: #28a745;
+  color: #27ae60;
 }
-
 .complexity-medium {
-  color: #ffc107;
+  color: #f39c12;
 }
-
 .complexity-high {
-  color: #fd7e14;
+  color: #e67e22;
 }
-
 .complexity-very-high {
-  color: #dc3545;
+  color: #e74c3c;
 }
 
-.credit-note {
-  font-size: 0.875rem;
-  color: #6c757d;
+.credit-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.credit-item.total {
+  font-weight: 600;
+  color: #2c3e50;
+  font-size: 1.1rem;
+}
+
+.insufficient-credits {
+  color: #e74c3c;
+  font-weight: 500;
+  text-align: right;
+}
+
+.cta-button {
+  background-color: #4a90e2;
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cta-button:hover:not(:disabled) {
+  background-color: #357abd;
+  transform: translateY(-2px);
+}
+
+.cta-button:disabled {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+}
+
+/* Task Progress Styles */
+.task-progress {
+  margin-top: 2rem;
+}
+
+.status-container {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.status-indicator {
   text-align: center;
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.status-indicator.pending {
+  color: #f39c12;
+}
+.status-indicator.processing {
+  color: #3498db;
+}
+.status-indicator.completed {
+  color: #27ae60;
+}
+.status-indicator.failed {
+  color: #e74c3c;
+}
+
+.progress-display {
+  margin-bottom: 2rem;
+}
+
+.progress-bar {
+  height: 8px;
+  background: #eee;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.progress-bar-inner {
+  height: 100%;
+  background: #4a90e2;
+  transition: width 0.3s ease;
+}
+
+.progress-bar-inner.partial {
+  background: #f39c12;
+}
+
+.progress-text {
+  text-align: center;
+  color: #666;
+}
+
+.progress-warning {
+  color: #f39c12;
+  font-weight: 500;
+}
+
+.task-statuses {
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.task-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  border-radius: 6px;
+  background: #f8f9fa;
+}
+
+.task-status.completed {
+  border-left: 4px solid #27ae60;
+}
+.task-status.processing {
+  border-left: 4px solid #3498db;
+}
+.task-status.pending {
+  border-left: 4px solid #f39c12;
+}
+.task-status.failed {
+  border-left: 4px solid #e74c3c;
+}
+
+.task-label {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.task-status-text {
+  color: #666;
+}
+
+.task-error-icon {
+  margin-left: auto;
+  cursor: help;
+}
+
+.warning-section,
+.error-section {
+  margin: 1rem 0;
+}
+
+.warning-message {
+  padding: 0.75rem;
+  background: #fff3cd;
+  color: #856404;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.error-message {
+  padding: 0.75rem;
+  background: #f8d7da;
+  color: #721c24;
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+}
+
+.download-section {
+  text-align: center;
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid #eee;
+}
+
+.download-button,
+.retry-button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.download-button {
+  background-color: #27ae60;
+  color: white;
+  border: none;
+  margin-right: 1rem;
+}
+
+.download-button:hover {
+  background-color: #219a52;
+}
+
+.retry-button {
+  background-color: #f39c12;
+  color: white;
+  border: none;
+}
+
+.retry-button:hover {
+  background-color: #d68910;
+}
+
+/* Credit Purchase Modal Styles */
+.purchase-credits-btn {
+  margin-left: 1rem;
+  padding: 0.5rem 1rem;
+  background-color: #50e3c2;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.purchase-credits-btn:hover {
+  background-color: #3dd1b0;
+  transform: translateY(-1px);
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal {
+  background-color: white;
+  padding: 2rem;
+  border-radius: 12px;
+  width: 90%;
+  max-width: 600px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.modal h2 {
+  text-align: center;
+  margin-bottom: 2rem;
+  color: #2c3e50;
+}
+
+.credit-packages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.credit-package {
+  padding: 1.5rem;
+  border: 2px solid #eee;
+  border-radius: 8px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.credit-package:hover {
+  border-color: #4a90e2;
+  transform: translateY(-2px);
+}
+
+.credit-package.selected {
+  border-color: #4a90e2;
+  background-color: #f8f9ff;
+}
+
+.credit-package h3 {
+  margin: 0;
+  color: #2c3e50;
+}
+
+.credit-package .price {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #4a90e2;
+  margin: 0.5rem 0;
+}
+
+.credit-package .savings {
+  color: #27ae60;
+  font-weight: 600;
+  margin: 0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+}
+
+.purchase-button,
+.cancel-button {
+  padding: 0.75rem 1.5rem;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.purchase-button {
+  background-color: #4a90e2;
+  color: white;
+  border: none;
+}
+
+.purchase-button:hover:not(:disabled) {
+  background-color: #357abd;
+}
+
+.purchase-button:disabled {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+}
+
+.cancel-button {
+  background-color: #f8f9fa;
+  color: #2c3e50;
+  border: 1px solid #dee2e6;
+}
+
+.cancel-button:hover {
+  background-color: #e9ecef;
 }
 
 @media (max-width: 768px) {
-  .demo-container {
-    margin: 1rem;
-    padding: 1.5rem;
+  .credit-packages {
+    grid-template-columns: 1fr;
   }
 
-  .hero-content h1 {
-    font-size: 2rem;
+  .modal {
+    margin: 1rem;
+    padding: 1.5rem;
   }
 }
 </style>

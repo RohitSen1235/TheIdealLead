@@ -10,6 +10,20 @@ const api = axios.create({
   },
 });
 
+// Add request interceptor to add auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 // Add response interceptor for better error handling
 api.interceptors.response.use(
   (response) => response,
@@ -34,11 +48,93 @@ api.interceptors.response.use(
         reader.readAsText(error.response.data);
       });
     }
+
+    // If unauthorized, clear token and redirect to login
+    if (error.response?.status === 401) {
+      localStorage.removeItem("access_token");
+      window.location.href = "/auth";
+    }
+
     return Promise.reject(error);
   }
 );
 
 export default {
+  async register(userData) {
+    try {
+      const response = await api.post("/register", userData);
+      if (response.data.access_token) {
+        localStorage.setItem("access_token", response.data.access_token);
+      }
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw new Error(error.response.data.message || "Registration failed");
+      } else if (error.request) {
+        throw new Error(
+          "No response from server. Please check your connection."
+        );
+      } else {
+        throw new Error("Failed to register: " + error.message);
+      }
+    }
+  },
+
+  async login(email, password) {
+    try {
+      const formData = new FormData();
+      formData.append("username", email);
+      formData.append("password", password);
+
+      // Create a new config for this specific request
+      const config = {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      };
+
+      // Convert FormData to URLSearchParams
+      const params = new URLSearchParams();
+      params.append("username", email);
+      params.append("password", password);
+
+      const response = await api.post("/token", params, config);
+      if (response.data.access_token) {
+        localStorage.setItem("access_token", response.data.access_token);
+      }
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw new Error(error.response.data.message || "Login failed");
+      } else if (error.request) {
+        throw new Error(
+          "No response from server. Please check your connection."
+        );
+      } else {
+        throw new Error("Failed to login: " + error.message);
+      }
+    }
+  },
+
+  async getUserProfile() {
+    try {
+      const response = await api.get("/users/me");
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw new Error(
+          error.response.data.message || "Failed to get user profile"
+        );
+      } else if (error.request) {
+        throw new Error(
+          "No response from server. Please check your connection."
+        );
+      } else {
+        throw new Error("Failed to get user profile: " + error.message);
+      }
+    }
+  },
+
   async submitLead(leadData) {
     try {
       const response = await api.post("/submit-lead/", leadData);
@@ -59,8 +155,8 @@ export default {
   async calculateCredits(icp, numLeads) {
     try {
       const response = await api.post("/calculate-credits/", {
-        icp: icp,
-        num_leads: numLeads,
+        ideal_customer_profile: icp,
+        number_of_leads: numLeads,
       });
       return response.data;
     } catch (error) {
@@ -80,7 +176,10 @@ export default {
 
   async startLeadGeneration(data) {
     try {
-      const response = await api.post("/start-lead-generation/", data);
+      const response = await api.post("/start-lead-generation/", {
+        ideal_customer_profile: data.ideal_customer_profile,
+        number_of_leads: data.number_of_leads,
+      });
       return response.data;
     } catch (error) {
       if (error.response) {
@@ -169,5 +268,29 @@ export default {
         throw new Error("Failed to download results: " + error.message);
       }
     }
+  },
+
+  async purchaseCredits(credits) {
+    try {
+      const response = await api.post("/purchase-credits/", { credits });
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw new Error(
+          error.response.data.message || "Failed to purchase credits"
+        );
+      } else if (error.request) {
+        throw new Error(
+          "No response from server. Please check your connection."
+        );
+      } else {
+        throw new Error("Failed to purchase credits: " + error.message);
+      }
+    }
+  },
+
+  logout() {
+    localStorage.removeItem("access_token");
+    window.location.href = "/auth";
   },
 };
