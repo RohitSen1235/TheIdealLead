@@ -24,6 +24,7 @@ class DBLead(Base):
     email = Column(String, unique=True, index=True)
     company = Column(String)
     phone = Column(String)
+    work_email = Column(String)  # Added for work email service
 
 class DBTransaction(Base):
     __tablename__ = "transactions"
@@ -66,12 +67,15 @@ class TokenData(BaseModel):
 class LeadGenerationRequest(BaseModel):
     ideal_customer_profile: str
     number_of_leads: int
+    get_work_email: bool = False  # Optional service for work email
+    get_phone_number: bool = False  # Optional service for phone number
 
 class LeadCreate(BaseModel):
     name: str
     email: EmailStr
     company: str
     phone: Optional[str] = None
+    work_email: Optional[str] = None
 
 class CreditPurchaseRequest(BaseModel):
     credits: int

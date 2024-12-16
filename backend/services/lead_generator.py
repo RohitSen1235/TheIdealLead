@@ -122,7 +122,7 @@ class LeadGenerator:
             Guide for scoring:
             - 10-15: simple, commonly used keywords
             - 15-20: moderately specific terms
-            - 20-30: slightly complex terms or combinations
+            - 20-30: slightly complex terms 
             - 30-40: industry-specific or technical terms
             - 40-50: combination of highly niche terms or specific industry or technical terms 
             """
@@ -156,7 +156,7 @@ class LeadGenerator:
             logger.error(f"Error getting complexity multiple: {str(e)}")
             return 1.0  # Default to 1.0 on error
 
-    async def calculate_credits(self, icp: str, num_leads: int) -> Dict[str, float]:
+    async def calculate_credits(self, icp: str, num_leads: int, get_work_email: bool = False, get_phone_number: bool = False) -> Dict[str, float]:
         """Calculate the number of credits required for lead generation"""
         # Get complexity multiple
         complexity_multiple = await self.get_complexity_multiple(icp)
@@ -167,20 +167,79 @@ class LeadGenerator:
         # Credits for AI processing (for generating search queries)
         ai_credits = num_leads * settings.AI_QUERY_CREDITS
         
+        # Additional credits for optional services
+        work_email_credits = num_leads * settings.BASE_CREDITS_PER_LEAD * 2 if get_work_email else 0
+        phone_number_credits = num_leads * settings.BASE_CREDITS_PER_LEAD * 3 if get_phone_number else 0
+        
         # Total credits required
-        total_credits = base_credits + ai_credits
+        total_credits = base_credits + ai_credits + work_email_credits + phone_number_credits
         
         return {
             "base_credits": round(base_credits, 1),
             "ai_credits": ai_credits,
+            "work_email_credits": work_email_credits,
+            "phone_number_credits": phone_number_credits,
             "total_credits": round(total_credits, 1),
             "complexity_multiple": complexity_multiple,
             "breakdown": {
                 "per_lead": settings.BASE_CREDITS_PER_LEAD,
                 "ai_processing": settings.AI_QUERY_CREDITS,
+                "work_email_cost": settings.BASE_CREDITS_PER_LEAD * 2 if get_work_email else 0,
+                "phone_number_cost": settings.BASE_CREDITS_PER_LEAD * 3 if get_phone_number else 0,
                 "number_of_leads": num_leads
             }
         }
+
+    async def get_work_email(self, name: str, company: str) -> Optional[str]:
+        """Use AI to generate dummy work email based on name and company for development"""
+        try:
+            prompt = f"""
+            Generate the most likely work email for this person based on their name and company.
+            Use common email patterns (e.g., first.last@company.com, firstinitiallast@company.com).
+            Return only the email address, nothing else.
+
+            Name: {name}
+            Company: {company}
+            """
+            
+            chat_completion = self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="mixtral-8x7b-32768",
+                temperature=0.1,
+            )
+            
+            email = chat_completion.choices[0].message.content.strip()
+            return email if '@' in email else None
+            
+        except Exception as e:
+            logger.error(f"Error generating work email: {str(e)}")
+            return None
+
+    async def get_phone_number(self, name: str, company: str) -> Optional[str]:
+        """Use AI to generate dummy business phone number"""
+        try:
+            prompt = f"""
+            Generate a plausible business phone number for this person.
+            Use standard US format (XXX-XXX-XXXX).
+            Return only the phone number, nothing else.
+
+            """
+            
+            chat_completion = self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="mixtral-8x7b-32768",
+                temperature=0.1,
+            )
+            
+            phone = chat_completion.choices[0].message.content.strip()
+            # Basic validation for phone number format
+            if len(phone.replace('-', '')) == 10 and phone.count('-') == 2:
+                return phone
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error generating phone number: {str(e)}")
+            return None
 
     async def process_icp_to_search_query(self, icp: str) -> List[str]:
         """Convert ICP description to exactly 5 LinkedIn search queries using Groq AI"""
@@ -397,8 +456,8 @@ class LeadGenerator:
         
         return SearchResult(profiles, len(profiles), list(warnings))
 
-    async def generate_leads(self, icp: str, num_leads: int, start_index: int = 0, seen_urls: Optional[Set[str]] = None, search_queries: Optional[List[str]] = None) -> Tuple[str, str]:
-        """Main method to generate leads from LinkedIn"""
+    async def generate_leads(self, icp: str, num_leads: int, get_work_email: bool = False, get_phone_number: bool = False, start_index: int = 0, seen_urls: Optional[Set[str]] = None, search_queries: Optional[List[str]] = None) -> Tuple[str, str]:
+        """Main method to generate leads from LinkedIn with optional services"""
         try:
             # First attempt with initial search queries
             if not search_queries:
@@ -409,17 +468,31 @@ class LeadGenerator:
             # If no profiles found, try one more time with new search queries
             if not search_result.profiles:
                 logger.warning("No profiles found in first attempt. Trying with new search queries...")
-                new_search_queries = await self.process_icp_to_search_query(icp)  # Generate new queries
+                new_search_queries = await self.process_icp_to_search_query(icp)
                 search_result = await self.scrape_linkedin_profiles(new_search_queries, num_leads, start_index, seen_urls)
             
             if search_result.profiles:
+                # Add optional services data
+                if get_work_email or get_phone_number:
+                    for profile in search_result.profiles:
+                        if get_work_email:
+                            profile['work_email'] = await self.get_work_email(profile['name'], profile['organization'])
+                        if get_phone_number:
+                            profile['phone_number'] = await self.get_phone_number(profile['name'], profile['organization'])
+                
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 icp_summary = icp.replace(" ", "_")[:30].lower()
                 filename = f"ICP_{icp_summary}_{start_index+1}_to_{start_index+len(search_result.profiles)}_{timestamp}.csv"
                 filepath = os.path.join(self.results_dir, filename)
                 
+                fieldnames = ['profile_url', 'name', 'organization', 'designation', 'timestamp']
+                if get_work_email:
+                    fieldnames.append('work_email')
+                if get_phone_number:
+                    fieldnames.append('phone_number')
+                
                 with open(filepath, 'w', newline='') as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=['profile_url', 'name', 'organization', 'designation', 'timestamp'])
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(search_result.profiles)
                 
@@ -430,14 +503,20 @@ class LeadGenerator:
                 
                 return filepath, message
             else:
-                # Instead of raising an error, return empty results
+                # Create empty results file
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 icp_summary = icp.replace(" ", "_")[:30].lower()
                 filename = f"ICP_{icp_summary}_no_results_{timestamp}.csv"
                 filepath = os.path.join(self.results_dir, filename)
                 
+                fieldnames = ['profile_url', 'name', 'organization', 'designation', 'timestamp']
+                if get_work_email:
+                    fieldnames.append('work_email')
+                if get_phone_number:
+                    fieldnames.append('phone_number')
+                
                 with open(filepath, 'w', newline='') as csvfile:
-                    writer = csv.DictWriter(csvfile, fieldnames=['profile_url', 'name', 'organization', 'designation', 'timestamp'])
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                     writer.writeheader()
                 
                 return filepath, "No profiles found after retrying with new search queries."

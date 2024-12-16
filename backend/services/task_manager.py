@@ -26,7 +26,7 @@ class TaskManager:
         queries = await lead_generator.process_icp_to_search_query(icp)
         return queries[:5]  # Limit to 5 queries, one per task
 
-    def create_distributed_tasks(self, icp: str, num_leads: int) -> str:
+    def create_distributed_tasks(self, icp: str, num_leads: int, get_work_email: bool = False, get_phone_number: bool = False) -> str:
         """Create multiple tasks that distribute the workload and return group ID"""
         group_id = str(uuid.uuid4())
         self.task_groups[group_id] = []
@@ -53,6 +53,8 @@ class TaskManager:
                     "leads_found": 0,
                     "start_index": start_index,
                     "query_index": i,  # Store task's index for query distribution
+                    "get_work_email": get_work_email,
+                    "get_phone_number": get_phone_number,
                     "status": TaskStatus.PENDING,
                     "created_at": datetime.now().isoformat(),
                     "completed_at": None,
@@ -175,9 +177,11 @@ class TaskManager:
                 result_file, message = await lead_generator.generate_leads(
                     task["icp"],
                     task["leads_to_find"],
-                    task["start_index"],
-                    self.group_seen_urls[group_id],
-                    task_query  # Pass single query as a list
+                    get_work_email=task["get_work_email"],
+                    get_phone_number=task["get_phone_number"],
+                    start_index=task["start_index"],
+                    seen_urls=self.group_seen_urls[group_id],
+                    search_queries=task_query  # Pass single query as a list
                 )
                 
                 # Extract number of leads found

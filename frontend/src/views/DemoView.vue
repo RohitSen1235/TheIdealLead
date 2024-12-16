@@ -1,4 +1,3 @@
-<!-- Same template as before but fix the credit packages section -->
 <template>
   <div>
     <!-- Hero Section -->
@@ -102,6 +101,31 @@
           </div>
         </div>
 
+        <!-- Optional Services Section -->
+        <div class="optional-services">
+          <h3>Optional Value-Added Services</h3>
+          <div class="service-options">
+            <div class="service-option">
+              <input type="checkbox" id="workEmail" v-model="getWorkEmail" />
+              <label for="workEmail">
+                Get Work Email
+                <span class="service-description"> (+2 credits per lead) </span>
+              </label>
+            </div>
+            <div class="service-option">
+              <input
+                type="checkbox"
+                id="phoneNumber"
+                v-model="getPhoneNumber"
+              />
+              <label for="phoneNumber">
+                Get Phone Number
+                <span class="service-description"> (+3 credits per lead) </span>
+              </label>
+            </div>
+          </div>
+        </div>
+
         <!-- Apply Button -->
         <button
           type="button"
@@ -129,6 +153,14 @@
               <span>AI Processing:</span>
               <span>{{ creditInfo.ai_credits }}</span>
             </div>
+            <div v-if="getWorkEmail" class="credit-item">
+              <span>Work Email Service:</span>
+              <span>{{ workEmailCredits }}</span>
+            </div>
+            <div v-if="getPhoneNumber" class="credit-item">
+              <span>Phone Number Service:</span>
+              <span>{{ phoneNumberCredits }}</span>
+            </div>
           </div>
           <div class="credit-details">
             <div class="credit-item total">
@@ -145,6 +177,7 @@
           </div>
         </div>
 
+        <!-- Rest of the form remains the same -->
         <button
           type="submit"
           class="cta-button"
@@ -252,7 +285,7 @@
 </template>
 
 <script>
-import api from "@/services/api";
+import api from "@/services/api.js";
 
 export default {
   data() {
@@ -260,6 +293,8 @@ export default {
       user: null,
       icp: "",
       numberOfLeads: null,
+      getWorkEmail: false,
+      getPhoneNumber: false,
       isSubmitting: false,
       currentGroupId: null,
       groupStatus: "pending",
@@ -290,6 +325,14 @@ export default {
         this.numberOfLeads >= 10 &&
         this.numberOfLeads <= 1000
       );
+    },
+
+    workEmailCredits() {
+      return this.getWorkEmail ? this.numberOfLeads * 2 : 0;
+    },
+
+    phoneNumberCredits() {
+      return this.getPhoneNumber ? this.numberOfLeads * 3 : 0;
     },
 
     isProcessing() {
@@ -325,19 +368,11 @@ export default {
     },
   },
 
-  async created() {
-    try {
-      this.user = await api.getUserProfile();
-    } catch (error) {
-      console.error("Failed to load user profile:", error);
-    }
-  },
-
   methods: {
     getComplexityClass(multiple) {
-      if (multiple <= 1.5) return "complexity-low";
-      if (multiple <= 3.0) return "complexity-medium";
-      if (multiple <= 5.0) return "complexity-high";
+      if (multiple <= 1.2) return "complexity-low";
+      if (multiple <= 1.5) return "complexity-medium";
+      if (multiple <= 2) return "complexity-high";
       return "complexity-very-high";
     },
 
@@ -348,6 +383,9 @@ export default {
             this.icp,
             this.numberOfLeads
           );
+          // Add additional credits for optional services
+          this.creditInfo.total_credits +=
+            this.workEmailCredits + this.phoneNumberCredits;
         } catch (error) {
           console.error("Error calculating credits:", error);
           this.creditInfo = null;
@@ -370,6 +408,8 @@ export default {
         const result = await api.startLeadGeneration({
           ideal_customer_profile: this.icp,
           number_of_leads: this.numberOfLeads,
+          get_work_email: this.getWorkEmail,
+          get_phone_number: this.getPhoneNumber,
         });
 
         this.currentGroupId = result.group_id;
@@ -475,6 +515,14 @@ export default {
     },
   },
 
+  async created() {
+    try {
+      this.user = await api.getUserProfile();
+    } catch (error) {
+      console.error("Failed to load user profile:", error);
+    }
+  },
+
   beforeUnmount() {
     this.stopStatusChecking();
   },
@@ -482,6 +530,48 @@ export default {
 </script>
 
 <style scoped>
+.service-description {
+  color: #666;
+  font-size: 0.9rem;
+  font-weight: normal;
+  background-color: #e9ecef;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  margin-left: 0.5rem;
+}
+
+.optional-services {
+  background-color: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+}
+
+.optional-services h3 {
+  color: #2c3e50;
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+}
+
+.service-options {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.service-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.service-option label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
 .hero {
   background: linear-gradient(135deg, #4a90e2, #50e3c2);
   color: white;

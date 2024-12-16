@@ -179,6 +179,8 @@ export default {
       const response = await api.post("/start-lead-generation/", {
         ideal_customer_profile: data.ideal_customer_profile,
         number_of_leads: data.number_of_leads,
+        get_work_email: data.get_work_email,
+        get_phone_number: data.get_phone_number,
       });
       return response.data;
     } catch (error) {

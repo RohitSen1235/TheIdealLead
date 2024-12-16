@@ -160,7 +160,9 @@ async def calculate_credits(
     try:
         credits_info = await lead_generator.calculate_credits(
             request.ideal_customer_profile,
-            request.number_of_leads
+            request.number_of_leads,
+            request.get_work_email,
+            request.get_phone_number
         )
         return credits_info
     except Exception as e:
@@ -177,7 +179,9 @@ async def start_lead_generation(
         # Calculate required credits
         credits_info = await lead_generator.calculate_credits(
             request.ideal_customer_profile,
-            request.number_of_leads
+            request.number_of_leads,
+            request.get_work_email,
+            request.get_phone_number
         )
         
         # Check if user has enough credits
@@ -194,7 +198,9 @@ async def start_lead_generation(
         # Create distributed tasks
         group_id = task_manager.create_distributed_tasks(
             icp=request.ideal_customer_profile,
-            num_leads=request.number_of_leads
+            num_leads=request.number_of_leads,
+            get_work_email=request.get_work_email,
+            get_phone_number=request.get_phone_number
         )
         
         # Start processing each task in the group
