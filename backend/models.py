@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime
+from typing import Optional, List
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 import datetime
 
@@ -25,6 +25,25 @@ class DBLead(Base):
     company = Column(String)
     phone = Column(String)
     work_email = Column(String)  # Added for work email service
+
+class DBTask(Base):
+    __tablename__ = "tasks"
+    id = Column(String, primary_key=True)  # UUID
+    user_id = Column(Integer, ForeignKey("users.id"))
+    group_id = Column(String, index=True)
+    icp = Column(String)
+    total_leads_needed = Column(Integer)
+    leads_to_find = Column(Integer)
+    leads_found = Column(Integer, default=0)
+    start_index = Column(Integer)
+    get_work_email = Column(Boolean, default=False)
+    get_phone_number = Column(Boolean, default=False)
+    status = Column(String)  # pending, processing, completed, failed
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    result_file = Column(String, nullable=True)
+    warning = Column(String, nullable=True)
+    error = Column(String, nullable=True)
 
 class DBTransaction(Base):
     __tablename__ = "transactions"
@@ -86,6 +105,18 @@ class CreditPurchaseResponse(BaseModel):
     amount: float
     credits: int
     message: Optional[str] = None
+
+class TaskResponse(BaseModel):
+    id: str
+    group_id: str
+    status: str
+    status_message: str
+    total_leads_found: int
+    total_leads_needed: int
+    warnings: List[str]
+    can_download: bool
+    created_at: datetime.datetime
+    completed_at: Optional[datetime.datetime]
 
 # For convenience, create aliases
 Lead = DBLead

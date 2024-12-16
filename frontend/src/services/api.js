@@ -217,6 +217,42 @@ export default {
     }
   },
 
+  async getUserTasks() {
+    try {
+      const response = await api.get("/tasks/");
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw new Error(error.response.data.message || "Failed to fetch tasks");
+      } else if (error.request) {
+        throw new Error(
+          "No response from server. Please check your connection."
+        );
+      } else {
+        throw new Error("Failed to fetch tasks: " + error.message);
+      }
+    }
+  },
+
+  async getTaskDetails(taskId) {
+    try {
+      const response = await api.get(`/tasks/${taskId}`);
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw new Error(
+          error.response.data.message || "Failed to fetch task details"
+        );
+      } else if (error.request) {
+        throw new Error(
+          "No response from server. Please check your connection."
+        );
+      } else {
+        throw new Error("Failed to fetch task details: " + error.message);
+      }
+    }
+  },
+
   async downloadResults(groupId) {
     try {
       const response = await api.get(`/download-results/${groupId}`, {

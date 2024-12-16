@@ -17,7 +17,8 @@ import smtplib
 from config import settings
 from models import (
     LeadGenerationRequest, LeadCreate, User, UserCreate, Token,
-    Base, DBLead, DBUser, CreditPurchaseRequest, CreditPurchaseResponse
+    Base, DBLead, DBUser, CreditPurchaseRequest, CreditPurchaseResponse,
+    TaskResponse
 )
 from services.lead_generator import LeadGenerator
 from services.task_manager import task_manager, TaskStatus
@@ -197,17 +198,20 @@ async def start_lead_generation(
         
         # Create distributed tasks
         group_id = task_manager.create_distributed_tasks(
-            icp=request.ideal_customer_profile,
-            num_leads=request.number_of_leads,
-            get_work_email=request.get_work_email,
-            get_phone_number=request.get_phone_number
+            db,
+            current_user.id,
+            request.ideal_customer_profile,
+            request.number_of_leads,
+            request.get_work_email,
+            request.get_phone_number
         )
         
         # Start processing each task in the group
-        group_status = task_manager.get_group_status(group_id)
+        group_status = task_manager.get_group_status(db, group_id, current_user.id)
         for task_id in group_status["task_statuses"].keys():
             background_tasks.add_task(
                 task_manager.process_task,
+                db,
                 task_id,
                 lead_generator
             )
@@ -221,30 +225,34 @@ async def start_lead_generation(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/task-status/{task_id}")
-async def get_task_status(
-    task_id: str,
-    current_user: DBUser = Depends(get_current_user)
+@app.get("/tasks/")
+async def get_user_tasks(
+    current_user: DBUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    # First try to get individual task status
-    status = task_manager.get_task_status(task_id)
-    if status:
-        return status
-        
-    # If not found, try to get group status
-    status = task_manager.get_group_status(task_id)  # task_id might be a group_id
-    if status:
-        return status
-        
-    raise HTTPException(status_code=404, detail="Task or group not found")
+    """Get all task groups for current user"""
+    return task_manager.get_user_task_groups(db, current_user.id)
+
+@app.get("/task-status/{group_id}")
+async def get_task_status(
+    group_id: str,
+    current_user: DBUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get status of a task group"""
+    status = task_manager.get_group_status(db, group_id, current_user.id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Task group not found")
+    return status
 
 @app.get("/download-results/{group_id}")
 async def download_results(
     group_id: str,
-    current_user: DBUser = Depends(get_current_user)
+    current_user: DBUser = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     # Get group status
-    group_status = task_manager.get_group_status(group_id)
+    group_status = task_manager.get_group_status(db, group_id, current_user.id)
     if not group_status:
         raise HTTPException(status_code=404, detail="Group not found")
         
