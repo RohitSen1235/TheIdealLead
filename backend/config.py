@@ -23,6 +23,10 @@ class Settings:
     # Server Settings
     CORS_ORIGINS: List[str] = os.getenv("CORS_ORIGINS", "http://localhost:8080").split(",")
 
+    # Credit Settings
+    BASE_CREDITS_PER_LEAD: int = int(os.getenv("BASE_CREDITS_PER_LEAD", "1"))
+    AI_QUERY_CREDITS: int = int(os.getenv("AI_QUERY_CREDITS", "1"))  # Credits for AI processing
+
     # Proxy Settings
     # Now supports both single proxy and multiple proxies
     PROXY_URLS: List[Dict[str, str]] = []

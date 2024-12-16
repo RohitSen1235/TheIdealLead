@@ -1,4 +1,4 @@
-<!-- Previous template section remains the same until the script tag -->
+<!-- Template section remains the same -->
 <template>
   <div>
     <!-- Hero Section -->
@@ -30,28 +30,76 @@
         @submit.prevent="startLeadGeneration"
         class="lead-generation-form"
       >
+        <!-- ICP and Apply Section -->
         <div class="form-group">
           <label for="icp">Ideal Customer Profile</label>
-          <textarea
-            v-model="icp"
-            id="icp"
-            placeholder="Describe your ideal customer (e.g., 'Purchasing Managers in North America working in the Aerospace industry')"
-            required
-          ></textarea>
+          <div class="input-with-button">
+            <textarea
+              v-model="icp"
+              id="icp"
+              placeholder="Describe your ideal customer (e.g., 'Purchasing Managers in North America working in the Aerospace industry')"
+              required
+            ></textarea>
+          </div>
         </div>
+
+        <!-- Number of Leads and Apply Section -->
         <div class="form-group">
           <label for="numberOfLeads">Number of Leads</label>
-          <input
-            v-model.number="numberOfLeads"
-            type="number"
-            id="numberOfLeads"
-            min="10"
-            max="1000"
-            placeholder="Enter number (1-1000)"
-            required
-          />
+          <div class="input-with-button">
+            <input
+              v-model.number="numberOfLeads"
+              type="number"
+              id="numberOfLeads"
+              min="10"
+              max="1000"
+              placeholder="Enter number (10-1000)"
+              required
+            />
+          </div>
         </div>
-        <button type="submit" class="cta-button" :disabled="isSubmitting">
+
+        <!-- Apply Button -->
+        <button
+          type="button"
+          class="apply-button"
+          :disabled="!canCalculateCredits"
+          @click="calculateRequiredCredits"
+        >
+          Estimate Credit Requirement
+        </button>
+
+        <!-- Credit Information -->
+        <div v-if="creditInfo" class="credit-info">
+          <div class="credit-breakdown">
+            <div class="complexity-info">
+              <span>Complexity Multiple:</span>
+              <span :class="getComplexityClass(creditInfo.complexity_multiple)">
+                {{ creditInfo.complexity_multiple }}x
+              </span>
+            </div>
+            <div class="credit-item">
+              <span>Base Credits:</span>
+              <span>{{ creditInfo.base_credits }}</span>
+            </div>
+            <div class="credit-item">
+              <span>AI Processing:</span>
+              <span>{{ creditInfo.ai_credits }}</span>
+            </div>
+          </div>
+          <div class="credit-details">
+            <div class="credit-item total">
+              <span>Estimated Credits Required:</span>
+              <span>{{ creditInfo.total_credits }}</span>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="submit"
+          class="cta-button"
+          :disabled="isSubmitting || !creditInfo"
+        >
           {{ isSubmitting ? "Starting Process..." : "Start Lead Generation" }}
         </button>
       </form>
@@ -168,10 +216,19 @@ export default {
       totalLeadsFound: 0,
       totalLeadsNeeded: 0,
       taskErrors: {},
+      creditInfo: null,
     };
   },
 
   computed: {
+    canCalculateCredits() {
+      return (
+        this.icp.trim() &&
+        this.numberOfLeads >= 10 &&
+        this.numberOfLeads <= 1000
+      );
+    },
+
     isProcessing() {
       return ["pending", "processing"].includes(this.groupStatus);
     },
@@ -197,9 +254,6 @@ export default {
     },
 
     canDownload() {
-      // Allow download if we have found profiles and either:
-      // 1. All tasks are complete (success or failure)
-      // 2. Some tasks failed but we have partial results
       return (
         this.totalLeadsFound > 0 &&
         (!this.isProcessing ||
@@ -209,7 +263,32 @@ export default {
   },
 
   methods: {
+    getComplexityClass(multiple) {
+      if (multiple <= 1.5) return "complexity-low";
+      if (multiple <= 3.0) return "complexity-medium";
+      if (multiple <= 5.0) return "complexity-high";
+      return "complexity-very-high";
+    },
+
+    async calculateRequiredCredits() {
+      if (this.canCalculateCredits) {
+        try {
+          this.creditInfo = await api.calculateCredits(
+            this.icp,
+            this.numberOfLeads
+          );
+        } catch (error) {
+          console.error("Error calculating credits:", error);
+          this.creditInfo = null;
+        }
+      }
+    },
+
     async startLeadGeneration() {
+      if (!this.creditInfo) {
+        return;
+      }
+
       this.isSubmitting = true;
       this.errors = [];
       this.warnings = [];
@@ -244,7 +323,6 @@ export default {
         this.totalLeadsFound = status.total_leads_found;
         this.totalLeadsNeeded = status.total_leads_needed;
 
-        // Stop checking if all tasks are complete or failed
         if (!this.isProcessing) {
           this.stopStatusChecking();
         }
@@ -267,7 +345,7 @@ export default {
     startStatusChecking() {
       this.statusCheckInterval = setInterval(() => {
         this.checkTaskStatus();
-      }, 2000); // Check every 2 seconds
+      }, 2000);
     },
 
     stopStatusChecking() {
@@ -286,7 +364,6 @@ export default {
     },
 
     async retryFailedTasks() {
-      // Reset status and start new task
       this.resetTask();
       await this.startLeadGeneration();
     },
@@ -396,6 +473,29 @@ input:focus {
   box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
 }
 
+.apply-button {
+  background-color: #2ecc71;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-bottom: 1rem;
+  width: 100%;
+}
+
+.apply-button:hover {
+  background-color: #27ae60;
+}
+
+.apply-button:disabled {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+}
+
 .cta-button,
 .download-button,
 .retry-button {
@@ -408,6 +508,7 @@ input:focus {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.3s ease;
+  width: 100%;
 }
 
 .cta-button:hover,
@@ -537,6 +638,69 @@ input:focus {
   padding: 0.75rem;
   border-radius: 8px;
   margin-bottom: 0.5rem;
+}
+
+.credit-info {
+  margin-top: 1rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+}
+
+.credit-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.credit-item {
+  display: flex;
+  justify-content: space-between;
+  color: #495057;
+}
+
+.credit-item.total {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #dee2e6;
+  font-weight: bold;
+  color: #2c3e50;
+}
+
+.credit-details {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid #dee2e6;
+}
+
+.complexity-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.complexity-low {
+  color: #28a745;
+}
+
+.complexity-medium {
+  color: #ffc107;
+}
+
+.complexity-high {
+  color: #fd7e14;
+}
+
+.complexity-very-high {
+  color: #dc3545;
+}
+
+.credit-note {
+  font-size: 0.875rem;
+  color: #6c757d;
+  text-align: center;
 }
 
 @media (max-width: 768px) {

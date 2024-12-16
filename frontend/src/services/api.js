@@ -56,6 +56,28 @@ export default {
     }
   },
 
+  async calculateCredits(icp, numLeads) {
+    try {
+      const response = await api.post("/calculate-credits/", {
+        icp: icp,
+        num_leads: numLeads,
+      });
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw new Error(
+          error.response.data.message || "Failed to calculate credits"
+        );
+      } else if (error.request) {
+        throw new Error(
+          "No response from server. Please check your connection."
+        );
+      } else {
+        throw new Error("Failed to calculate credits: " + error.message);
+      }
+    }
+  },
+
   async startLeadGeneration(data) {
     try {
       const response = await api.post("/start-lead-generation/", data);

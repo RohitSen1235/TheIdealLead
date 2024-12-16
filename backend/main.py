@@ -145,6 +145,21 @@ async def submit_lead(lead: LeadCreate, background_tasks: BackgroundTasks, db: S
 async def read_root():
     return {"message": "Welcome to the Lead Generation API"}
 
+class CreditCalculationRequest(BaseModel):
+    icp: str
+    num_leads: int
+
+@app.post("/calculate-credits/")
+async def calculate_credits(request: CreditCalculationRequest):
+    """Calculate credits required for lead generation"""
+    if request.num_leads <= 0:
+        raise HTTPException(status_code=400, detail="Number of leads must be greater than 0")
+    try:
+        credits_info = await lead_generator.calculate_credits(request.icp, request.num_leads)
+        return credits_info
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/start-lead-generation/")
 async def start_lead_generation(request: LeadGenerationRequest, background_tasks: BackgroundTasks):
     try:

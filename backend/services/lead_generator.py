@@ -13,8 +13,8 @@ import logging
 import random
 from collections import defaultdict
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - only show warnings and errors
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 class SearchResult:
@@ -36,8 +36,6 @@ class ProxyManager:
         self.max_errors = 2  # Max errors before cooldown
         self.cooldown_minutes = 5  # Cooldown period in minutes
         self.min_delay = 1  # Minimum seconds between requests per proxy
-        
-        logger.info(f"Initialized ProxyManager with {len(proxies)} proxies")
 
     def _get_proxy_key(self, proxy: Dict[str, str]) -> str:
         """Generate a unique key for a proxy"""
@@ -89,18 +87,16 @@ class ProxyManager:
         """Mark a proxy as successful"""
         proxy_key = self._get_proxy_key(proxy)
         self.success_counts[proxy_key] += 1
-        self.error_counts[proxy_key] = max(0, self.error_counts[proxy_key] - 1)  # Reduce error count on success
+        self.error_counts[proxy_key] = max(0, self.error_counts[proxy_key] - 1)
 
     def mark_error(self, proxy: Dict[str, str]):
         """Mark a proxy as failed"""
         proxy_key = self._get_proxy_key(proxy)
         self.error_counts[proxy_key] += 1
         
-        # If too many errors, put proxy in cooldown
         if self.error_counts[proxy_key] >= self.max_errors:
             self.cooldown_until[proxy_key] = datetime.now() + timedelta(minutes=self.cooldown_minutes)
-            logger.warning(f"Proxy {proxy['url']} placed in cooldown until {self.cooldown_until[proxy_key]}")
-            self.error_counts[proxy_key] = 0  # Reset error count after cooldown
+            self.error_counts[proxy_key] = 0
 
 class LeadGenerator:
     def __init__(self):
@@ -110,62 +106,125 @@ class LeadGenerator:
         self.groq_client = groq.Groq(api_key=settings.GROQ_API_KEY)
         self.results_dir = "lead_results"
         
-        # Create results directory if it doesn't exist
         if not os.path.exists(self.results_dir):
             os.makedirs(self.results_dir)
 
-        # Initialize proxy manager if proxies are configured
         self.proxy_manager = ProxyManager(settings.PROXY_URLS) if settings.is_proxy_configured else None
-        if self.proxy_manager:
-            logger.info(f"Initialized with {len(settings.PROXY_URLS)} proxies")
-        else:
-            logger.warning("No proxies configured - Google rate limiting may occur")
+
+    async def get_complexity_multiple(self, icp: str) -> float:
+        """Get complexity multiple from Groq AI based on ICP keywords"""
+        try:
+            prompt = f"""
+            Return ONLY a whole number between 10 and 50 to represent the complexity of these ICP keywords. No text, no explanations, just the number.
+
+            ICP: {icp}
+
+            Guide for scoring:
+            - 10-15: simple, commonly used keywords
+            - 15-20: moderately specific terms
+            - 20-30: slightly complex terms or combinations
+            - 30-40: industry-specific or technical terms
+            - 40-50: combination of highly niche terms or specific industry or technical terms 
+            """
+            
+            chat_completion = self.groq_client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="mixtral-8x7b-32768",
+                temperature=0.6,
+            )
+            
+            # Extract and validate the number
+            response_text = chat_completion.choices[0].message.content.strip()
+            
+            # Remove any non-numeric characters
+            cleaned_response = ''.join(c for c in response_text if c.isdigit())
+            
+            try:
+                # Convert to integer first
+                complexity_int = int(cleaned_response)
+                # Ensure the number is within bounds
+                complexity_int = max(10, min(50, complexity_int))
+                # Convert to float by dividing by 10
+                return complexity_int / 10.0
+                
+            except (ValueError, TypeError) as e:
+                logger.error(f"Failed to parse complexity multiple from AI response: {response_text}")
+                logger.error(f"Parsing error: {str(e)}")
+                return 1.0  # Default to 1.0 if parsing fails
+                
+        except Exception as e:
+            logger.error(f"Error getting complexity multiple: {str(e)}")
+            return 1.0  # Default to 1.0 on error
+
+    async def calculate_credits(self, icp: str, num_leads: int) -> Dict[str, float]:
+        """Calculate the number of credits required for lead generation"""
+        # Get complexity multiple
+        complexity_multiple = await self.get_complexity_multiple(icp)
+        
+        # Base credits per lead adjusted by complexity
+        base_credits = num_leads * settings.BASE_CREDITS_PER_LEAD * complexity_multiple
+        
+        # Credits for AI processing (for generating search queries)
+        ai_credits = num_leads * settings.AI_QUERY_CREDITS
+        
+        # Total credits required
+        total_credits = base_credits + ai_credits
+        
+        return {
+            "base_credits": round(base_credits, 1),
+            "ai_credits": ai_credits,
+            "total_credits": round(total_credits, 1),
+            "complexity_multiple": complexity_multiple,
+            "breakdown": {
+                "per_lead": settings.BASE_CREDITS_PER_LEAD,
+                "ai_processing": settings.AI_QUERY_CREDITS,
+                "number_of_leads": num_leads
+            }
+        }
 
     async def process_icp_to_search_query(self, icp: str) -> List[str]:
-        """Convert ICP description to multiple Google search queries using Groq AI"""
+        """Convert ICP description to exactly 5 LinkedIn search queries using Groq AI"""
         try:
-            logger.info("Generating search queries from ICP...")
             prompt = f"""
-            Convert this Ideal Customer Profile description into 5 different Google search queries that will find LinkedIn profiles of matching people.
-            Each query should use different combinations of terms to maximize results.
-            Use LinkedIn's site search and relevant operators.
+            Convert this Ideal Customer Profile description into exactly 5 different LinkedIn search queries.
+            Each query should use different combinations of terms to maximize unique results.
             
             ICP Description: {icp}
             
-            Format each query like this example:
-            site:linkedin.com/in/ (Job Title OR Alternative Title) AND (Industry OR Sector) AND (Location OR Region)
+            Format each query like this:
+            site:linkedin.com/in/ (Job Title OR Alternative Title) AND (Industry OR Company)
             
             Return exactly 5 different search queries, one per line, nothing else.
             Make each query unique by using different synonyms or combinations.
             """
             
             chat_completion = self.groq_client.chat.completions.create(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
+                messages=[{"role": "user", "content": prompt}],
                 model="mixtral-8x7b-32768",
                 temperature=0.2,
             )
             
             queries = chat_completion.choices[0].message.content.strip().split('\n')
-            # Ensure we have at least one query
-            if not queries:
-                return [f'site:linkedin.com/in/ {icp}']
-            logger.info(f"Generated {len(queries)} search queries")
-            return queries[:5]  # Limit to 5 queries
+            
+            # Ensure exactly 5 queries
+            if len(queries) < 5:
+                # Add basic queries if needed
+                base_query = f'site:linkedin.com/in/ {icp}'
+                while len(queries) < 5:
+                    queries.append(base_query)
+            
+            return queries[:5]  # Return exactly 5 queries
             
         except Exception as e:
             logger.error(f"Error in Groq AI processing: {str(e)}")
-            # Fallback to basic query if AI processing fails
-            return [f'site:linkedin.com/in/ {icp}']
+            # Fallback to 5 basic queries
+            base_query = f'site:linkedin.com/in/ {icp}'
+            return [base_query] * 5
 
     def is_valid_linkedin_profile_url(self, url: str) -> bool:
         """Validate if URL is a legitimate LinkedIn profile URL"""
-        # Remove any query parameters
-        base_url = url.split('?')[0].split('&')[0]
+        # Remove any query parameters and fragments
+        base_url = url.split('?')[0].split('#')[0].lower()
         
         # Basic validation rules
         if not base_url.startswith('https://www.linkedin.com/in/'):
@@ -184,7 +243,7 @@ class LeadGenerator:
             
         return True
 
-    def extract_linkedin_url(self, google_url: str) -> str:
+    def extract_linkedin_url(self, google_url: str) -> Optional[str]:
         """Extract clean LinkedIn profile URL from Google redirect URL"""
         try:
             # Find the LinkedIn URL portion
@@ -204,7 +263,7 @@ class LeadGenerator:
             # Clean up the URL
             url = url.split('?')[0].split('&')[0]
             
-            return url
+            return url if self.is_valid_linkedin_profile_url(url) else None
             
         except Exception as e:
             logger.error(f"Error extracting LinkedIn URL: {str(e)}")
@@ -238,14 +297,11 @@ class LeadGenerator:
                                 return html, True
                         
                         self.proxy_manager.mark_error(proxy)
-                        logger.warning(f"Request failed with proxy {proxy['url']}, status: {response.status}")
                         
                 except Exception as e:
                     self.proxy_manager.mark_error(proxy)
-                    logger.error(f"Error with proxy {proxy['url']}: {str(e)}")
             
             else:
-                # No proxy available, make direct request
                 try:
                     async with session.get(url, headers=headers) as response:
                         if response.status == 200:
@@ -253,32 +309,30 @@ class LeadGenerator:
                             if "unusual traffic" not in html.lower() and "captcha" not in html.lower():
                                 return html, True
                 except Exception as e:
-                    logger.error(f"Error making direct request: {str(e)}")
+                    pass
             
             current_retry += 1
             if current_retry < max_retries:
-                await asyncio.sleep(random.uniform(1, 3))  # Random delay between retries
+                await asyncio.sleep(random.uniform(1, 3))
         
         return "", False
 
     async def scrape_linkedin_profiles(self, search_queries: List[str], num_leads: int, start_index: int = 0, seen_urls: Optional[Set[str]] = None) -> SearchResult:
         """Scrape LinkedIn profile URLs from Google search results"""
         profiles = []
-        seen_urls = seen_urls if seen_urls is not None else set()  # Use provided set or create new one
-        warnings = set()  # Use set to avoid duplicate warnings
+        seen_urls = seen_urls if seen_urls is not None else set()
+        warnings = set()
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
 
-        # Configure timeout
-        timeout = aiohttp.ClientTimeout(total=30)  # 30 second timeout
-        max_pages = 20
+        timeout = aiohttp.ClientTimeout(total=30)
+        max_pages = int((num_leads/2.5) + 1)  # Calculate max_pages based on required leads
         max_empty_pages = 2
         
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            for query_index, search_query in enumerate(search_queries, 1):
-                logger.info(f"Processing query {query_index}/{len(search_queries)} for profiles {start_index+1} to {start_index+num_leads}")
+            for search_query in search_queries:
                 if len(profiles) >= num_leads:
                     break
                     
@@ -289,14 +343,12 @@ class LeadGenerator:
                 
                 while len(profiles) < num_leads and consecutive_empty_pages < max_empty_pages:
                     google_url = f"https://www.google.com/search?q={encoded_query}&start={google_start_index}"
-                    logger.info(f"Searching page {(google_start_index//10) + 1} for query {query_index}")
                     
                     html, success = await self.make_request(session, google_url, headers)
                     if not success:
                         warnings.add("Search request failed. Consider checking proxy configuration.")
                         break
 
-                    # Check for end of results
                     if "did not match any documents" in html:
                         break
 
@@ -309,82 +361,68 @@ class LeadGenerator:
                         if 'linkedin.com/in/' in href:
                             linkedin_url = self.extract_linkedin_url(href)
                             
-                            if linkedin_url and self.is_valid_linkedin_profile_url(linkedin_url):
-                                if linkedin_url not in seen_urls:
-                                    found_valid_links = True
-                                    seen_urls.add(linkedin_url)
-                                    
-                                    profile_data = {
-                                        'profile_url': linkedin_url,
-                                        'name': '',  # Temporarily disabled
-                                        'organization': '',  # Temporarily disabled
-                                        'designation': '',  # Temporarily disabled
-                                        'timestamp': datetime.now().isoformat()
-                                    }
-                                    
-                                    profiles.append(profile_data)
-                                    logger.info(f"Found profile {start_index + len(profiles)}")
-                                    
-                                    if len(profiles) >= num_leads:
-                                        break
+                            if linkedin_url and linkedin_url not in seen_urls:
+                                found_valid_links = True
+                                seen_urls.add(linkedin_url)
+                                
+                                profile_data = {
+                                    'profile_url': linkedin_url,
+                                    'name': '',
+                                    'organization': '',
+                                    'designation': '',
+                                    'timestamp': datetime.now().isoformat()
+                                }
+                                
+                                profiles.append(profile_data)
+                                
+                                if len(profiles) >= num_leads:
+                                    break
 
                     if not found_valid_links:
                         consecutive_empty_pages += 1
                     else:
                         consecutive_empty_pages = 0
                     
-                    # Move to next page
                     google_start_index += 10
                     
-                    # Check if we've reached page limit
                     if google_start_index >= max_pages * 10:
                         reached_page_limit = True
                         break
                 
                 if reached_page_limit and len(profiles) < num_leads:
-                    warnings.add(f"Reached maximum page limit ({max_pages} pages) for search query {query_index}.")
+                    warnings.add(f"Reached maximum page limit ({max_pages} pages) for search query.")
         
-        # Only add exhausted warning if we didn't find enough profiles
         if len(profiles) < num_leads:
             warnings.add(f"Found {len(profiles)} profiles out of {num_leads} requested from available search results.")
         
         return SearchResult(profiles, len(profiles), list(warnings))
 
     async def generate_leads(self, icp: str, num_leads: int, start_index: int = 0, seen_urls: Optional[Set[str]] = None, search_queries: Optional[List[str]] = None) -> Tuple[str, str]:
-        """Main method to generate leads. Returns tuple of (filepath, message)"""
+        """Main method to generate leads from LinkedIn"""
         try:
-            logger.info(f"Starting lead generation for ICP: {icp[:50]}... (profiles {start_index+1} to {start_index+num_leads})")
-            
-            # Use provided search queries or generate new ones
+            # First attempt with initial search queries
             if not search_queries:
                 search_queries = await self.process_icp_to_search_query(icp)
             
-            # Log which queries this task will use
-            logger.info(f"Using {len(search_queries)} search queries for this task")
-            for i, query in enumerate(search_queries, 1):
-                logger.info(f"Query {i}: {query}")
-            
-            # Scrape profiles using the queries
             search_result = await self.scrape_linkedin_profiles(search_queries, num_leads, start_index, seen_urls)
             
-            # Always save whatever profiles we found
+            # If no profiles found, try one more time with new search queries
+            if not search_result.profiles:
+                logger.warning("No profiles found in first attempt. Trying with new search queries...")
+                new_search_queries = await self.process_icp_to_search_query(icp)  # Generate new queries
+                search_result = await self.scrape_linkedin_profiles(new_search_queries, num_leads, start_index, seen_urls)
+            
             if search_result.profiles:
-                # Generate unique filename with ICP summary and range
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                # Create a short summary from ICP (first 30 chars)
                 icp_summary = icp.replace(" ", "_")[:30].lower()
                 filename = f"ICP_{icp_summary}_{start_index+1}_to_{start_index+len(search_result.profiles)}_{timestamp}.csv"
                 filepath = os.path.join(self.results_dir, filename)
                 
-                # Save results to CSV with new fields
                 with open(filepath, 'w', newline='') as csvfile:
                     writer = csv.DictWriter(csvfile, fieldnames=['profile_url', 'name', 'organization', 'designation', 'timestamp'])
                     writer.writeheader()
                     writer.writerows(search_result.profiles)
                 
-                logger.info(f"Lead generation completed. Found {len(search_result.profiles)} profiles.")
-                
-                # Create appropriate message based on results
                 if search_result.total_found >= num_leads:
                     message = f"Successfully found {search_result.total_found} profiles."
                 else:
@@ -392,7 +430,17 @@ class LeadGenerator:
                 
                 return filepath, message
             else:
-                raise ValueError("No profiles found in search results.")
+                # Instead of raising an error, return empty results
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                icp_summary = icp.replace(" ", "_")[:30].lower()
+                filename = f"ICP_{icp_summary}_no_results_{timestamp}.csv"
+                filepath = os.path.join(self.results_dir, filename)
+                
+                with open(filepath, 'w', newline='') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=['profile_url', 'name', 'organization', 'designation', 'timestamp'])
+                    writer.writeheader()
+                
+                return filepath, "No profiles found after retrying with new search queries."
             
         except Exception as e:
             error_message = str(e)

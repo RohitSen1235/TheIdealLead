@@ -21,25 +21,10 @@ class TaskManager:
         self.group_queries: Dict[str, List[str]] = {}  # Group ID -> List of search queries
 
     async def _generate_search_queries(self, lead_generator, icp: str) -> List[str]:
-        """Generate all search queries for a group"""
-        # Request more queries since we'll distribute them
-        num_tasks = self.max_concurrent_tasks
-        queries_per_task = 3  # Each task gets 3 unique queries
-        total_queries_needed = num_tasks * queries_per_task
-        
-        all_queries = []
-        # Generate queries in batches of 5 until we have enough
-        while len(all_queries) < total_queries_needed:
-            new_queries = await lead_generator.process_icp_to_search_query(icp)
-            # Add only unique queries
-            for query in new_queries:
-                if query not in all_queries:
-                    all_queries.append(query)
-            # Avoid infinite loop if we can't get enough unique queries
-            if len(all_queries) < total_queries_needed and len(all_queries) >= len(new_queries):
-                break
-                
-        return all_queries
+        """Generate search queries for a group - one unique query per task"""
+        # Generate exactly 5 queries (one per potential task)
+        queries = await lead_generator.process_icp_to_search_query(icp)
+        return queries[:5]  # Limit to 5 queries, one per task
 
     def create_distributed_tasks(self, icp: str, num_leads: int) -> str:
         """Create multiple tasks that distribute the workload and return group ID"""
@@ -183,22 +168,19 @@ class TaskManager:
                 if not self.group_queries.get(group_id):
                     self.group_queries[group_id] = await self._generate_search_queries(lead_generator, task["icp"])
                 
-                # Get this task's portion of queries
-                queries_per_task = len(self.group_queries[group_id]) // len(self.task_groups[group_id])
-                start_idx = task["query_index"] * queries_per_task
-                end_idx = start_idx + queries_per_task
-                task_queries = self.group_queries[group_id][start_idx:end_idx]
+                # Get this task's specific query (one query per task)
+                task_query = [self.group_queries[group_id][task["query_index"]]]
                 
-                # Pass task-specific queries and shared seen_urls set to lead generator
+                # Pass single query and shared seen_urls set to lead generator
                 result_file, message = await lead_generator.generate_leads(
                     task["icp"],
                     task["leads_to_find"],
                     task["start_index"],
                     self.group_seen_urls[group_id],
-                    task_queries  # Pass task-specific queries
+                    task_query  # Pass single query as a list
                 )
                 
-                # Extract number of leads found from warning message
+                # Extract number of leads found
                 leads_found = 0
                 if result_file:
                     import csv
@@ -215,7 +197,6 @@ class TaskManager:
                 
             except Exception as e:
                 self.update_task_status(task_id, TaskStatus.FAILED, error=str(e))
-                # Don't raise the exception - let other tasks continue
                 return
 
     def cleanup_old_tasks(self, max_age_hours: int = 24):
